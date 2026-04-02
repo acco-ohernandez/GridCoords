@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <!--<AddIn Type="Command">
+    <Text>GridCoords - Command 1</Text>
+    <Description>Some description</Description>
+    <Assembly>GridCoords\GridCoords.dll</Assembly>
+    <FullClassName>GridCoords.Command1</FullClassName>
+    <ClientId>fc6e5f99-d423-4078-ac1c-80c7e9ca4481</ClientId>
+    <VendorId>com.YOUR COMPANY NAME</VendorId>
+    <VendorDescription>YOUR COMPANY NAME, YOUR COMPANY URL</VendorDescription>
+  </AddIn>
+  <AddIn Type="Command">
+    <Text>GridCoords - Command 2</Text>
+    <Description>Some description</Description>
+    <Assembly>GridCoords\GridCoords.dll</Assembly>
+    <FullClassName>GridCoords.Command2</FullClassName>
+    <ClientId>c6c19e30-7a44-4758-982b-22081974c757</ClientId>
+    <VendorId>com.YOUR COMPANY NAME</VendorId>
+    <VendorDescription>YOUR COMPANY NAME, YOUR COMPANY URL</VendorDescription>
+  </AddIn>-->
+  <AddIn Type="Application">
+    <Name>GridCoords</Name>
+    <Assembly>GridCoords\GridCoords.dll</Assembly>
+    <FullClassName>GridCoords.App</FullClassName>
+    <ClientId>43863615-d4c6-4923-b9ee-74fe4cb8e1bd</ClientId>
+    <VendorId>com.YOUR COMPANY NAME</VendorId>
+    <VendorDescription>YOUR COMPANY NAME, YOUR COMPANY URL</VendorDescription>
+  </AddIn>
+</RevitAddIns>
