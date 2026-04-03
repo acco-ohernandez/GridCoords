@@ -22,9 +22,12 @@ namespace GridCoords.Forms
         private readonly GridCoords_EventHandler _handler;
         private IntPtr _revitHandle;
 
-        // ── State ──
-        private readonly ObservableCollection<GridRowItem> _gridItems = new ObservableCollection<GridRowItem>();
+        // ── State: three separate lists for H, V, and Other grids ──
+        private readonly ObservableCollection<GridRowItem> _hGridItems = new ObservableCollection<GridRowItem>();
+        private readonly ObservableCollection<GridRowItem> _vGridItems = new ObservableCollection<GridRowItem>();
+        private readonly ObservableCollection<GridRowItem> _otherGridItems = new ObservableCollection<GridRowItem>();
         private ElementId _lastViewId;
+        private bool _suppressSelectAllEvents;
 
         // ── Extensible Storage schema ──
         private static readonly Guid SchemaGuid = new Guid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890");
@@ -45,10 +48,16 @@ namespace GridCoords.Forms
             _revitHandle = uiApp.MainWindowHandle;
             _lastViewId = viewId;
 
-            GridDataGrid.ItemsSource = _gridItems;
-            foreach (var g in initialGrids) _gridItems.Add(g);
+            // Bind the three ItemsControls
+            HGridList.ItemsSource = _hGridItems;
+            VGridList.ItemsSource = _vGridItems;
+            OtherGridList.ItemsSource = _otherGridItems;
+
+            // Distribute grids into the three groups
+            DistributeGrids(initialGrids);
 
             TblViewName.Text = $"View: {viewName}";
+            UpdateExpanderHeaders();
             UpdateIntersectionCount();
             UpdateFormatPreview();
 
@@ -58,6 +67,56 @@ namespace GridCoords.Forms
             this.Loaded += OnLoaded;
             this.Closed += OnClosed;
         }
+
+        // ── Grid distribution into H / V / Other ──
+
+        private void DistributeGrids(List<GridRowItem> allGrids)
+        {
+            _hGridItems.Clear();
+            _vGridItems.Clear();
+            _otherGridItems.Clear();
+
+            foreach (var g in allGrids)
+            {
+                switch (g.Orientation)
+                {
+                    case "Horizontal":
+                        _hGridItems.Add(g);
+                        break;
+                    case "Vertical":
+                        _vGridItems.Add(g);
+                        break;
+                    default: // Angled, Curved
+                        _otherGridItems.Add(g);
+                        break;
+                }
+            }
+
+            // Show/hide Angled/Curved section
+            if (ExpanderOtherGrids != null)
+                ExpanderOtherGrids.Visibility = _otherGridItems.Count > 0
+                    ? WinVisibility.Visible
+                    : WinVisibility.Collapsed;
+        }
+
+        private void UpdateExpanderHeaders()
+        {
+            if (ExpanderHGrids == null || ExpanderVGrids == null || ExpanderOtherGrids == null) return;
+
+            int hSelected = _hGridItems.Count(g => g.IsSelected);
+            int vSelected = _vGridItems.Count(g => g.IsSelected);
+            ExpanderHGrids.Header = $"Horizontal Grids ({hSelected} of {_hGridItems.Count})";
+            ExpanderVGrids.Header = $"Vertical Grids ({vSelected} of {_vGridItems.Count})";
+
+            if (_otherGridItems.Count > 0)
+                ExpanderOtherGrids.Header = $"Angled / Curved ({_otherGridItems.Count})";
+        }
+
+        /// <summary>
+        /// All grid items across all three groups (convenience accessor for placement logic).
+        /// </summary>
+        private IEnumerable<GridRowItem> AllGridItems =>
+            _hGridItems.Concat(_vGridItems).Concat(_otherGridItems);
 
         // ── Lifecycle ──
 
@@ -121,21 +180,18 @@ namespace GridCoords.Forms
         {
             if (symbol == null) { CmbParameters.ItemsSource = null; return; }
 
-            // Get text parameters from the family's type and instance parameters
             var paramItems = new List<ParameterItem>();
 
-            // Get instance params by temporarily checking the family
             var family = symbol.Family;
             if (family != null)
             {
-                var familyDoc = doc; // We'll read from placed instances or family params
-                // Collect from symbol parameters
+                // Collect from symbol (type) parameters
                 foreach (Parameter p in symbol.Parameters)
                 {
                     if (p.StorageType == StorageType.String && !p.IsReadOnly)
                         paramItems.Add(new ParameterItem { Name = p.Definition.Name, ParamDefinition = p.Definition });
                 }
-                // Also get instance parameters from family (if any instances exist)
+                // Also get instance parameters from a placed instance (if any exist)
                 var sampleInstance = new FilteredElementCollector(doc)
                     .OfClass(typeof(FamilyInstance))
                     .OfCategory(BuiltInCategory.OST_GenericAnnotation)
@@ -219,15 +275,16 @@ namespace GridCoords.Forms
                 var viewName = view.Name;
                 var viewId = view.Id;
 
-                // Populate dropdowns too
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     _lastViewId = viewId;
-                    _gridItems.Clear();
-                    foreach (var g in newItems) _gridItems.Add(g);
+                    DistributeGrids(newItems);
                     TblViewName.Text = $"View: {viewName}";
+                    UpdateExpanderHeaders();
                     UpdateIntersectionCount();
+                    UpdateFormatPreview();
                     PopulateDropdowns(doc);
+                    SetStatus("Ready.");
                 }));
             };
             _externalEvent.Raise();
@@ -237,10 +294,15 @@ namespace GridCoords.Forms
 
         private void UpdateIntersectionCount()
         {
-            var hGrids = _gridItems.Where(g => g.IsSelected && g.Orientation == "Horizontal").ToList();
-            var vGrids = _gridItems.Where(g => g.IsSelected && g.Orientation == "Vertical").ToList();
-            int count = hGrids.Count * vGrids.Count;
-            TblIntersectionCount.Text = $"{count} intersections found";
+            if (TblIntersectionCount == null) return;
+
+            int hCount = _hGridItems.Count(g => g.IsSelected);
+            int vCount = _vGridItems.Count(g => g.IsSelected);
+            // Also count any Angled/Curved grids reassigned to H or V
+            hCount += _otherGridItems.Count(g => g.IsSelected && g.Orientation == "Horizontal");
+            vCount += _otherGridItems.Count(g => g.IsSelected && g.Orientation == "Vertical");
+            int total = hCount * vCount;
+            TblIntersectionCount.Text = $"{total} intersections  ({hCount} H  x  {vCount} V)";
         }
 
         // ── Format preview ──
@@ -254,8 +316,8 @@ namespace GridCoords.Forms
             string vSample = "1";
 
             // Try to use actual grid names if available
-            var hGrid = _gridItems.FirstOrDefault(g => g.IsSelected && g.Orientation == "Horizontal");
-            var vGrid = _gridItems.FirstOrDefault(g => g.IsSelected && g.Orientation == "Vertical");
+            var hGrid = _hGridItems.FirstOrDefault(g => g.IsSelected);
+            var vGrid = _vGridItems.FirstOrDefault(g => g.IsSelected);
             if (hGrid != null) hSample = hGrid.GridName;
             if (vGrid != null) vSample = vGrid.GridName;
 
@@ -307,7 +369,6 @@ namespace GridCoords.Forms
 
             string viewIdStr = ViewIdToString(view.Id);
 
-            // Collect TextNotes and GenericAnnotation FamilyInstances in this view
             var candidates = new List<Element>();
 
             var textNotes = new FilteredElementCollector(doc, view.Id)
@@ -365,7 +426,7 @@ namespace GridCoords.Forms
                 return;
             }
 
-            // Collect settings from UI (captured before Raise via closure)
+            // Collect settings from UI thread
             bool useTextNote = false;
             TextNoteType selectedTextType = null;
             FamilySymbol selectedSymbol = null;
@@ -392,8 +453,14 @@ namespace GridCoords.Forms
                 deleteExisting = RbDeleteExisting.IsChecked == true;
                 skipExisting = RbSkipExisting.IsChecked == true;
 
-                hGridItems = _gridItems.Where(g => g.IsSelected && g.Orientation == "Horizontal").ToList();
-                vGridItems = _gridItems.Where(g => g.IsSelected && g.Orientation == "Vertical").ToList();
+                // Gather H grids: main H list + any Other grids reassigned to Horizontal
+                hGridItems = _hGridItems.Where(g => g.IsSelected)
+                    .Concat(_otherGridItems.Where(g => g.IsSelected && g.Orientation == "Horizontal"))
+                    .ToList();
+                // Gather V grids: main V list + any Other grids reassigned to Vertical
+                vGridItems = _vGridItems.Where(g => g.IsSelected)
+                    .Concat(_otherGridItems.Where(g => g.IsSelected && g.Orientation == "Vertical"))
+                    .ToList();
             });
 
             if (hGridItems.Count == 0 || vGridItems.Count == 0)
@@ -416,7 +483,7 @@ namespace GridCoords.Forms
                 return;
             }
 
-            // Compute model offset
+            // Compute model offset: paper inches → model feet
             double modelOffsetX, modelOffsetY;
             if (autoOffset)
             {
@@ -469,7 +536,7 @@ namespace GridCoords.Forms
                     if (view.CropBoxActive)
                         cropBox = view.CropBox;
 
-                    // Resolve grid ElementIds to Grid objects
+                    // Resolve grid ElementIds to Revit Grid objects
                     var hGrids = hGridItems.Select(gi => doc.GetElement(gi.GridId) as RevitGrid).Where(g => g != null).ToList();
                     var vGrids = vGridItems.Select(gi => doc.GetElement(gi.GridId) as RevitGrid).Where(g => g != null).ToList();
 
@@ -549,7 +616,7 @@ namespace GridCoords.Forms
                             catch (Exception ex)
                             {
                                 errorCount++;
-                                errorDetails += $"{hGrid.Name}×{vGrid.Name}: {ex.Message}\n";
+                                errorDetails += $"{hGrid.Name} x {vGrid.Name}: {ex.Message}\n";
                             }
                         }
                     }
@@ -564,7 +631,7 @@ namespace GridCoords.Forms
                 }
             }
 
-            // Update UI
+            // Update UI on WPF thread
             int placed = placedCount;
             int deleted = deletedCount;
             int skipped = skippedCount;
@@ -694,14 +761,46 @@ namespace GridCoords.Forms
             TxtOffsetY.IsEnabled = !auto;
         }
 
-        private void HeaderToggleAll_Click(object sender, RoutedEventArgs e)
+        // ── Grid checkbox events ──
+
+        private void GridCheckBox_Changed(object sender, RoutedEventArgs e)
         {
-            GridDataGrid.CommitEdit(DataGridEditingUnit.Row, true);
-            bool anyUnchecked = _gridItems.Any(g => !g.IsSelected);
-            foreach (var item in _gridItems)
-                item.IsSelected = anyUnchecked;
-            GridDataGrid.Items.Refresh();
+            if (_suppressSelectAllEvents) return;
+            UpdateExpanderHeaders();
             UpdateIntersectionCount();
+            UpdateFormatPreview();
+        }
+
+        private void CkSelectAllH_Changed(object sender, RoutedEventArgs e)
+        {
+            if (CkSelectAllH == null) return;
+            _suppressSelectAllEvents = true;
+            bool check = CkSelectAllH.IsChecked == true;
+            foreach (var item in _hGridItems) item.IsSelected = check;
+            _suppressSelectAllEvents = false;
+            UpdateExpanderHeaders();
+            UpdateIntersectionCount();
+            UpdateFormatPreview();
+        }
+
+        private void CkSelectAllV_Changed(object sender, RoutedEventArgs e)
+        {
+            if (CkSelectAllV == null) return;
+            _suppressSelectAllEvents = true;
+            bool check = CkSelectAllV.IsChecked == true;
+            foreach (var item in _vGridItems) item.IsSelected = check;
+            _suppressSelectAllEvents = false;
+            UpdateExpanderHeaders();
+            UpdateIntersectionCount();
+            UpdateFormatPreview();
+        }
+
+        private void OtherGridOrientation_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            // When user reassigns an Angled/Curved grid to H or V, update counts
+            UpdateExpanderHeaders();
+            UpdateIntersectionCount();
+            UpdateFormatPreview();
         }
 
         private void BtnRefreshGrids_Click(object sender, RoutedEventArgs e)
@@ -788,8 +887,9 @@ namespace GridCoords.Forms
         public string DetectedOrientation { get; set; }
         public ElementId GridId { get; set; }
 
-        public List<string> AvailableOrientations { get; } =
-            new List<string> { "Horizontal", "Vertical", "Angled", "Curved" };
+        /// <summary>Options shown in the Angled/Curved section for reassignment.</summary>
+        public List<string> AssignableOrientations { get; } =
+            new List<string> { "Angled", "Curved", "Horizontal", "Vertical" };
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null)
