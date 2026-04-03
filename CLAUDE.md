@@ -46,14 +46,18 @@ CheckBox, Button, NumericInput styles).
     families/types + ComboBox: text parameters on selected type
   - FamilySymbol activation handled before placement:
     if (!symbol.IsActive) symbol.Activate(); doc.Regenerate();
+  - ComboBox selections are preserved across Grid Scope changes
+    and view refreshes (saved/restored by ElementId/name)
 
 [Expander: Label Format]
   - TextBox with token template, default: ({H},{V})
-    Tokens: {H} = horizontal grid name, {V} = vertical grid name
+    Tokens: {H} = "more horizontal" grid name,
+            {V} = "more vertical" grid name
   - Empty template falls back to ({H},{V})
   - RadioButton group: (H,V) or (V,H) order
-  - Live preview TextBlock showing example with actual grid names
+  - Live preview TextBlock using first enabled pairing's grids
   - Comprehensive tooltip on Template label with format examples
+    and diagonal token assignment explanation
 
 [Expander: Placement Options]
   - Checkbox: "Auto offset" (default ON, scales with View.Scale)
@@ -84,21 +88,29 @@ CheckBox, Button, NumericInput styles).
       shows "{N} picked" count
   - Scope affects both Place Labels and Delete Labels
 
-[Expander: Horizontal Grids]
+[Expander: Horizontal Grids — XAML-defined]
   - Header shows "(N of M)" selection count
   - Select All checkbox
   - WrapPanel of checkboxes (compact layout, natural sort)
 
-[Expander: Vertical Grids]
+[Expander: Vertical Grids — XAML-defined]
   - Same layout as Horizontal Grids
 
-[Expander: Angled / Curved — collapsed, hidden when empty]
-  - Only shown when angled/curved grids exist in view
-  - Each grid shows detected orientation + ComboBox to
-    reassign as Horizontal or Vertical
+[Dynamic Group Expanders — programmatic]
+  - Generated for diagonal and curved grid groups
+  - Same visual structure as H/V expanders (Select All + WrapPanel)
+  - Each group has self-contained SelectAll via GridGroup class
+  - Only shown when non-orthogonal grids exist in view
+
+[Expander: Intersection Pairings]
+  - Shows all cross-group pairings (N×(N-1)/2)
+  - Each pairing has enable/disable checkbox
+  - Labels show "{H} × {V} = count" with token assignment
+  - Token rule: group with smaller angle → {H} ("more horizontal")
+  - Live count updates when grid selections change
 
 [Intersection Count]
-  - "{N} intersections  (H x V)" with live math breakdown
+  - Total across all enabled pairings with per-pairing breakdown
 
 [Expander: Results — starts Collapsed, shown after execution]
   Grid layout:
@@ -113,38 +125,62 @@ CheckBox, Button, NumericInput styles).
 Three buttons centered:
   [Place Labels]  [Delete Labels]  [Close]
 
-  • Place Labels → ExternalEvent: run intersection logic, place
+  • Place Labels → ExternalEvent: iterate enabled pairings,
+    compute intersections per pairing, place labels
   • Delete Labels → ExternalEvent: scope-aware deletion,
-    only deletes labels matching displayed grids when using
-    Selected/Pick scope (deletes all in All Visible mode)
+    collects all grid names from all displayed groups into
+    a single HashSet, only deletes matching labels
+    (deletes all in All Visible mode)
   • Close → close form
   • Buttons disable during execution, re-enable on complete
 
 Status TextBlock below: "Ready." / "Placing labels…" / "12 placed."
 
+── ANGLE-BASED GRID GROUPING ─────────────────────────────────
+
+Grid classification uses angle relative to view.RightDirection:
+  - Compute angle: acos(|dot(lineDir, viewRight)|) → 0°–180°
+  - Cluster by circular distance with 10° tolerance
+  - Circular distance: min(|a-b|, 180-|a-b|) for wraparound
+  - 0° ± 10° → Horizontal (standard), 90° ± 10° → Vertical
+  - All other angles → Diagonal (~N°)
+  - Curved grids → separate Curved group (angle = -1)
+
+Data model:
+  - GridGroup: collection, label, angle, classification, SelectAll
+  - IntersectionPairing: two groups + enable flag + token assignment
+  - PairingSnapshot: lightweight UI-thread capture for ExternalEvent
+
+Hybrid UI approach:
+  - H and V groups use XAML-defined expanders (backward compatible)
+  - Non-standard groups use DynamicGroupsContainer (StackPanel)
+  - All groups stored in _allGridGroups list for unified logic
+
 ── CORE LOGIC (inside ExternalEvent HandlerAction) ────────────
 
-1. Collect checked grids from H and V lists (+ reassigned Others)
-2. For every H×V pair: Curve.Intersect(otherCurve, out results)
+1. Snapshot enabled pairings with selected grid items from UI thread
+2. For each enabled pairing, iterate H-token-group × V-token-group
+3. Curve.Intersect(otherCurve, out results)
+   — Handle multiple intersection points (curved grids)
    — check SetComparisonResult, extract XYZ from results
    — Curve.Intersect deprecated in 2026, suppressed via #pragma
-3. Filter to crop region: if view.CropBoxActive, test point
+4. Filter to crop region: if view.CropBoxActive, test point
    against view.CropBox BoundingBoxXYZ min/max (simple rect)
-4. Handle existing labels per user setting (query ES schema)
-5. Place TextNote.Create(doc, viewId, xyz+offset, label, typeId)
+5. Handle existing labels per user setting (query ES schema)
+6. Place TextNote.Create(doc, viewId, xyz+offset, label, typeId)
    or doc.Create.NewFamilyInstance(xyz, symbol, view) + set param
-6. Tag each placed element with Extensible Storage:
+7. Tag each placed element with Extensible Storage:
      Schema GUID: A1B2C3D4-E5F6-7890-ABCD-EF1234567890
      Fields: ViewIdStr (string), HGridName (string), VGridName (string)
      ViewId stored as string for multi-version compatibility
-7. Dispatcher.BeginInvoke → update Results panel + status
+8. Dispatcher.BeginInvoke → update Results panel + status
 
 ── TRANSACTION & ERROR HANDLING ───────────────────────────────
 
 - Single Transaction wrapping all placements
 - Validate before running:
     • Active view is plan/ceiling plan/area plan
-    • At least one H and one V grid are checked
+    • At least one enabled pairing with selected grids
     • If FamilyInstance mode: symbol loaded + parameter exists
     • Template field: falls back to ({H},{V}) if empty
     • TagElement: null-guarded against failed element creation
@@ -159,7 +195,7 @@ InitializeComponent completes XAML parsing):
   • UpdateFormatPreview()
   • UpdateExpanderHeaders()
   • UpdateIntersectionCount()
-  • DistributeGrids()
+  • DistributeGrids() → BuildDynamicGroupExpanders(), BuildPairingsUI()
 
 ── FILES ──────────────────────────────────────────────────────
 
@@ -179,6 +215,10 @@ InitializeComponent completes XAML parsing):
 - Type aliases to avoid ambiguity:
     RevitGrid = Autodesk.Revit.DB.Grid
     WinVisibility = System.Windows.Visibility
+- Fully-qualified WPF types in programmatic UI building:
+    System.Windows.Controls.CheckBox (avoids WinForms ambiguity)
+    System.Windows.Controls.Orientation
 - Natural sort comparer for grid names
 - Clean ThreadIdle unsubscribe on form close
 - GridSelectionFilter (ISelectionFilter) for Pick Grids mode
+- Very descriptive variable names throughout (no abbreviations)

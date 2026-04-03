@@ -120,7 +120,7 @@
                                            Width="70"
                                            VerticalAlignment="Center"
                                            FontWeight="Normal"
-                                           ToolTip="Define the label format using tokens:&#x0a;&#x0a;  {H} = Horizontal grid name&#x0a;  {V} = Vertical grid name&#x0a;&#x0a;Examples:&#x0a;  ({H},{V})      →  (A,3)&#x0a;  {H}-{V}        →  A-3&#x0a;  {H}/{V}        →  A/3&#x0a;  Grid {H}.{V}   →  Grid A.3&#x0a;  [{V},{H}]      →  [3,A]&#x0a;&#x0a;Use the Order setting below to swap&#x0a;which grid name fills {H} vs {V}."/>
+                                           ToolTip="Define the label format using tokens:&#x0a;&#x0a;  {H} = 'More horizontal' grid name&#x0a;  {V} = 'More vertical' grid name&#x0a;&#x0a;Examples:&#x0a;  ({H},{V})      →  (A,3)&#x0a;  {H}-{V}        →  A-3&#x0a;  {H}/{V}        →  A/3&#x0a;  Grid {H}.{V}   →  Grid A.3&#x0a;  [{V},{H}]      →  [3,A]&#x0a;&#x0a;Token assignment for diagonal grids:&#x0a;  Each pairing assigns {H} to the group&#x0a;  whose angle is closer to horizontal (0°),&#x0a;  and {V} to the more vertical group.&#x0a;  See the Intersection Pairings section.&#x0a;&#x0a;Use the Order setting below to swap&#x0a;which grid name fills {H} vs {V}."/>
                                 <TextBox x:Name="TxtLabelTemplate"
                                          Text="({H},{V})"
                                          FontWeight="Normal"
@@ -230,19 +230,11 @@
             </ScrollViewer>
 
             <!-- ═══ RIGHT COLUMN: Grids + Results ═════════════════ -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
 
                 <!-- ── VIEW INFO + REFRESH ────────────────────── -->
-                <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                <DockPanel Margin="0,0,0,6">
                     <Button x:Name="BtnRefreshGrids"
                             Content="Refresh"
                             DockPanel.Dock="Right"
@@ -257,7 +249,7 @@
                 </DockPanel>
 
                 <!-- ── GRID SCOPE ─────────────────────────────── -->
-                <Expander Grid.Row="1" Header="Grid Scope">
+                <Expander Header="Grid Scope">
                     <StackPanel Margin="2,4">
                         <RadioButton x:Name="RbScopeAllVisible"
                                      Content="All Visible Grids"
@@ -301,78 +293,71 @@
                 </Expander>
 
                 <!-- ── HORIZONTAL GRIDS ───────────────────────── -->
-                <Expander Grid.Row="2" x:Name="ExpanderHGrids" Header="Horizontal Grids">
-                    <DockPanel Margin="2,4">
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                <Expander x:Name="ExpanderHGrids" Header="Horizontal Grids">
+                    <StackPanel Margin="2,4">
+                        <DockPanel Margin="0,0,0,4">
                             <CheckBox x:Name="CkSelectAllH"
                                       Content="Select All"
                                       IsChecked="True"
                                       Checked="CkSelectAllH_Changed"
                                       Unchecked="CkSelectAllH_Changed"/>
                         </DockPanel>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl x:Name="HGridList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <CheckBox Content="{Binding GridName}"
-                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  Margin="0,2,12,2"
-                                                  FontWeight="Normal"
-                                                  Checked="GridCheckBox_Changed"
-                                                  Unchecked="GridCheckBox_Changed"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
+                        <ItemsControl x:Name="HGridList">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding GridName}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              Margin="0,2,12,2"
+                                              FontWeight="Normal"
+                                              Checked="GridCheckBox_Changed"
+                                              Unchecked="GridCheckBox_Changed"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Expander>
 
                 <!-- ── VERTICAL GRIDS ─────────────────────────── -->
-                <Expander Grid.Row="3" x:Name="ExpanderVGrids" Header="Vertical Grids">
-                    <DockPanel Margin="2,4">
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                <Expander x:Name="ExpanderVGrids" Header="Vertical Grids">
+                    <StackPanel Margin="2,4">
+                        <DockPanel Margin="0,0,0,4">
                             <CheckBox x:Name="CkSelectAllV"
                                       Content="Select All"
                                       IsChecked="True"
                                       Checked="CkSelectAllV_Changed"
                                       Unchecked="CkSelectAllV_Changed"/>
                         </DockPanel>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl x:Name="VGridList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <CheckBox Content="{Binding GridName}"
-                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  Margin="0,2,12,2"
-                                                  FontWeight="Normal"
-                                                  Checked="GridCheckBox_Changed"
-                                                  Unchecked="GridCheckBox_Changed"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
+                        <ItemsControl x:Name="VGridList">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding GridName}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              Margin="0,2,12,2"
+                                              FontWeight="Normal"
+                                              Checked="GridCheckBox_Changed"
+                                              Unchecked="GridCheckBox_Changed"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Expander>
 
-                <!-- ── ANGLED / CURVED GRIDS ──────────────────── -->
-                <Expander Grid.Row="4" x:Name="ExpanderOtherGrids"
+                <!-- ── ANGLED / CURVED GRIDS (legacy, now hidden — replaced by dynamic groups) ── -->
+                <Expander x:Name="ExpanderOtherGrids"
                           Header="Angled / Curved (excluded)"
                           IsExpanded="False"
                           Visibility="Collapsed">
                     <StackPanel Margin="2,4">
-                        <TextBlock Text="Reassign these grids to Horizontal or Vertical:"
-                                   FontWeight="Normal" FontStyle="Italic" Foreground="Gray"
-                                   Margin="0,0,0,4"/>
                         <ItemsControl x:Name="OtherGridList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -381,17 +366,6 @@
                                                    Width="60"
                                                    VerticalAlignment="Center"
                                                    FontWeight="Normal"/>
-                                        <TextBlock Text="{Binding DetectedOrientation}"
-                                                   Width="60"
-                                                   VerticalAlignment="Center"
-                                                   FontWeight="Normal"
-                                                   Foreground="Gray"
-                                                   FontStyle="Italic"/>
-                                        <ComboBox ItemsSource="{Binding AssignableOrientations}"
-                                                  SelectedValue="{Binding Orientation, Mode=TwoWay}"
-                                                  FontWeight="Normal"
-                                                  Width="100"
-                                                  SelectionChanged="OtherGridOrientation_Changed"/>
                                     </DockPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -399,9 +373,18 @@
                     </StackPanel>
                 </Expander>
 
+                <!-- ── DYNAMIC GROUP EXPANDERS (for diagonal / curved angle groups) ── -->
+                <StackPanel x:Name="DynamicGroupsContainer"/>
+
+                <!-- ── INTERSECTION PAIRINGS ──────────────────── -->
+                <Expander x:Name="ExpanderIntersectionPairings"
+                          Header="Intersection Pairings"
+                          Visibility="Collapsed">
+                    <StackPanel x:Name="PairingsContainer" Margin="2,4"/>
+                </Expander>
+
                 <!-- ── INTERSECTION COUNT ─────────────────────── -->
                 <TextBlock x:Name="TblIntersectionCount"
-                           Grid.Row="5"
                            Text="0 intersections found"
                            FontWeight="Normal"
                            FontStyle="Italic"
@@ -411,7 +394,6 @@
                 <!-- ── RESULTS ────────────────────────────────── -->
                 <Expander x:Name="ResultsExpander"
                           Header="Results"
-                          Grid.Row="6"
                           Visibility="Collapsed">
                     <Grid Margin="6,4">
                         <Grid.ColumnDefinitions>
@@ -444,7 +426,8 @@
                                    TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
                     </Grid>
                 </Expander>
-            </Grid>
+            </StackPanel>
+            </ScrollViewer>
 
         </Grid>
 
