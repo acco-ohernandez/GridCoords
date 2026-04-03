@@ -887,6 +887,26 @@ namespace GridCoords.Forms
             element.SetEntity(entity);
         }
 
+        /// <summary>
+        /// Gets the 2D tangent direction of a curve, normalized.
+        /// For lines, returns the line direction. For curves, returns the tangent at midpoint.
+        /// </summary>
+        private static XYZ GetCurveTangentDirection(Curve curve)
+        {
+            if (curve is Line line)
+            {
+                var direction = line.Direction;
+                return new XYZ(direction.X, direction.Y, 0).Normalize();
+            }
+            else
+            {
+                // For curved grids, use the tangent at the midpoint
+                double midParameter = (curve.GetEndParameter(0) + curve.GetEndParameter(1)) / 2.0;
+                var tangent = curve.ComputeDerivatives(midParameter, false).BasisX;
+                return new XYZ(tangent.X, tangent.Y, 0).Normalize();
+            }
+        }
+
         private static string ViewIdToString(ElementId id)
         {
             return id.ToString();
@@ -967,6 +987,9 @@ namespace GridCoords.Forms
             double offsetX = 0, offsetY = 0;
             bool deleteExisting = false;
             bool skipExisting = false;
+            bool alignAboveGrid = true;
+            bool alignRightOfGrid = true;
+            bool rotateDiagonalLabels = true;
 
             // Snapshot the enabled pairings and their grid items from the UI thread
             var enabledPairingSnapshots = new List<PairingSnapshot>();
@@ -984,6 +1007,9 @@ namespace GridCoords.Forms
                 double.TryParse(TxtOffsetY.Text, out offsetY);
                 deleteExisting = RbDeleteExisting.IsChecked == true;
                 skipExisting = RbSkipExisting.IsChecked == true;
+                alignAboveGrid = RbAlignAbove.IsChecked == true;
+                alignRightOfGrid = RbAlignRight.IsChecked == true;
+                rotateDiagonalLabels = CkRotateDiagonal.IsChecked == true;
 
                 // Gather enabled pairings with their selected grid items
                 foreach (var pairing in _intersectionPairings)
@@ -998,7 +1024,9 @@ namespace GridCoords.Forms
                         enabledPairingSnapshots.Add(new PairingSnapshot
                         {
                             HorizontalGridItems = horizontalGridsInPairing,
-                            VerticalGridItems = verticalGridsInPairing
+                            VerticalGridItems = verticalGridsInPairing,
+                            HGroupAngleDegrees = pairing.GroupForHToken.RepresentativeAngleDegrees,
+                            VGroupAngleDegrees = pairing.GroupForVToken.RepresentativeAngleDegrees
                         });
                     }
                 }
@@ -1024,20 +1052,13 @@ namespace GridCoords.Forms
                 return;
             }
 
-            // Compute model offset: paper inches → model feet
-            double modelOffsetX, modelOffsetY;
-            if (autoOffset)
-            {
-                double scale = view.Scale;
-                modelOffsetX = 0.125 * scale / 12.0;
-                modelOffsetY = 0.125 * scale / 12.0;
-            }
-            else
-            {
-                double scale = view.Scale;
-                modelOffsetX = offsetX * scale / 12.0;
-                modelOffsetY = offsetY * scale / 12.0;
-            }
+            // Compute model offset values: paper inches → model feet
+            double viewScale = view.Scale;
+            double manualModelOffsetX = offsetX * viewScale / 12.0;
+            double manualModelOffsetY = offsetY * viewScale / 12.0;
+
+            // Auto offset: small padding between the label edge and the grid line
+            double paddingModelUnits = (1.0 / 32.0) * viewScale / 12.0;
 
             int placedCount = 0;
             int deletedCount = 0;
@@ -1140,27 +1161,105 @@ namespace GridCoords.Forms
                                         else
                                             labelText = labelTemplate.Replace("{H}", verticalGridName).Replace("{V}", horizontalGridName);
 
-                                        // Apply offset
-                                        var placementPoint = new XYZ(
-                                            intersectionPoint.X + modelOffsetX,
-                                            intersectionPoint.Y + modelOffsetY,
-                                            intersectionPoint.Z);
+                                        // ── Create element at the intersection point ──
+                                        Element placedElement = null;
 
                                         if (useTextNote)
                                         {
-                                            var textNote = TextNote.Create(doc, view.Id, placementPoint,
+                                            var textNote = TextNote.Create(doc, view.Id, intersectionPoint,
                                                 labelText, selectedTextType.Id);
-                                            TagElement(textNote, ViewIdToString(view.Id), horizontalGridName, verticalGridName);
+                                            placedElement = textNote;
                                         }
                                         else
                                         {
                                             var familyInstance = doc.Create.NewFamilyInstance(
-                                                placementPoint, selectedSymbol, view);
+                                                intersectionPoint, selectedSymbol, view);
                                             var textParameter = familyInstance.LookupParameter(selectedParam.Name);
                                             if (textParameter != null && !textParameter.IsReadOnly)
                                                 textParameter.Set(labelText);
-                                            TagElement(familyInstance, ViewIdToString(view.Id), horizontalGridName, verticalGridName);
+                                            placedElement = familyInstance;
                                         }
+
+                                        if (placedElement == null) continue;
+
+                                        // Regenerate so the bounding box is available
+                                        doc.Regenerate();
+
+                                        // ── Measure the element's bounding box (before rotation) ──
+                                        BoundingBoxXYZ elementBoundingBox = placedElement.get_BoundingBox(view);
+
+                                        // ── Compute how far each edge of the bbox is from the intersection ──
+                                        double distanceToLeftEdge = elementBoundingBox != null
+                                            ? elementBoundingBox.Min.X - intersectionPoint.X : 0;
+                                        double distanceToRightEdge = elementBoundingBox != null
+                                            ? elementBoundingBox.Max.X - intersectionPoint.X : 0;
+                                        double distanceToBottomEdge = elementBoundingBox != null
+                                            ? elementBoundingBox.Min.Y - intersectionPoint.Y : 0;
+                                        double distanceToTopEdge = elementBoundingBox != null
+                                            ? elementBoundingBox.Max.Y - intersectionPoint.Y : 0;
+
+                                        // ── Compute the alignment move vector ──
+                                        double alignmentMoveX, alignmentMoveY;
+
+                                        if (!autoOffset)
+                                        {
+                                            // Manual mode: use fixed user-specified offsets
+                                            alignmentMoveX = manualModelOffsetX;
+                                            alignmentMoveY = manualModelOffsetY;
+                                        }
+                                        else
+                                        {
+                                            // Auto mode: align edges to grid lines with padding
+                                            if (alignRightOfGrid)
+                                                alignmentMoveX = paddingModelUnits - distanceToLeftEdge;
+                                            else
+                                                alignmentMoveX = -paddingModelUnits - distanceToRightEdge;
+
+                                            if (alignAboveGrid)
+                                                alignmentMoveY = paddingModelUnits - distanceToBottomEdge;
+                                            else
+                                                alignmentMoveY = -paddingModelUnits - distanceToTopEdge;
+                                        }
+
+                                        // ── Rotate for diagonal grids ──
+                                        double rotationAngleRadians = 0;
+                                        bool shouldRotateThisLabel = rotateDiagonalLabels
+                                            && !pairingSnapshot.IsOrthogonalPairing;
+
+                                        if (shouldRotateThisLabel)
+                                        {
+                                            // Compute rotation angle from the H-token grid's tangent
+                                            XYZ horizontalGridTangent = GetCurveTangentDirection(horizontalCurve);
+                                            rotationAngleRadians = Math.Atan2(horizontalGridTangent.Y, horizontalGridTangent.X);
+
+                                            // Keep text readable (not upside down): constrain to -90° to +90°
+                                            if (rotationAngleRadians > Math.PI / 2.0)
+                                                rotationAngleRadians -= Math.PI;
+                                            if (rotationAngleRadians < -Math.PI / 2.0)
+                                                rotationAngleRadians += Math.PI;
+
+                                            // Rotate the alignment move vector to match the grid direction
+                                            double cosAngle = Math.Cos(rotationAngleRadians);
+                                            double sinAngle = Math.Sin(rotationAngleRadians);
+                                            double rotatedMoveX = alignmentMoveX * cosAngle - alignmentMoveY * sinAngle;
+                                            double rotatedMoveY = alignmentMoveX * sinAngle + alignmentMoveY * cosAngle;
+                                            alignmentMoveX = rotatedMoveX;
+                                            alignmentMoveY = rotatedMoveY;
+
+                                            // Rotate the element around the intersection point
+                                            Line rotationAxis = Line.CreateBound(
+                                                intersectionPoint,
+                                                intersectionPoint + XYZ.BasisZ);
+                                            ElementTransformUtils.RotateElement(
+                                                doc, placedElement.Id, rotationAxis, rotationAngleRadians);
+                                        }
+
+                                        // ── Move element to aligned position ──
+                                        XYZ alignmentMoveVector = new XYZ(alignmentMoveX, alignmentMoveY, 0);
+                                        ElementTransformUtils.MoveElement(doc, placedElement.Id, alignmentMoveVector);
+
+                                        // ── Tag with Extensible Storage ──
+                                        TagElement(placedElement, ViewIdToString(view.Id), horizontalGridName, verticalGridName);
 
                                         placedCount++;
                                     }
@@ -1676,10 +1775,32 @@ namespace GridCoords.Forms
     /// Lightweight snapshot of a pairing's selected grids, captured on the UI thread
     /// for safe use on the Revit external event thread.
     /// </summary>
+    /// <summary>
+    /// Lightweight snapshot of a pairing's selected grids and group angles,
+    /// captured on the UI thread for safe use on the Revit external event thread.
+    /// </summary>
     public class PairingSnapshot
     {
         public List<GridRowItem> HorizontalGridItems { get; set; }
         public List<GridRowItem> VerticalGridItems { get; set; }
+
+        /// <summary>
+        /// Representative angle in degrees of the H-token group (the "more horizontal" group).
+        /// 0 for standard Horizontal, 90 for standard Vertical, other values for diagonal.
+        /// </summary>
+        public double HGroupAngleDegrees { get; set; }
+
+        /// <summary>
+        /// Representative angle in degrees of the V-token group (the "more vertical" group).
+        /// </summary>
+        public double VGroupAngleDegrees { get; set; }
+
+        /// <summary>
+        /// True if this pairing is between the standard Horizontal (0°) and Vertical (90°) groups.
+        /// Used for optimized orthogonal offset placement.
+        /// </summary>
+        public bool IsOrthogonalPairing =>
+            Math.Abs(HGroupAngleDegrees) < 10 && Math.Abs(VGroupAngleDegrees - 90) < 10;
     }
 
     /// <summary>

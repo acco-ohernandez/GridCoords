@@ -161,6 +161,51 @@
                     <!-- ── PLACEMENT OPTIONS ──────────────────── -->
                     <Expander Header="Placement Options">
                         <StackPanel Margin="2,4">
+
+                            <!-- Label alignment relative to grid lines -->
+                            <TextBlock Text="Label Alignment"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,4"/>
+                            <DockPanel>
+                                <TextBlock Text="Vertical:"
+                                           VerticalAlignment="Center"
+                                           FontWeight="Normal"
+                                           Width="80"/>
+                                <RadioButton x:Name="RbAlignAbove"
+                                             Content="Above grid"
+                                             GroupName="VerticalAlign"
+                                             IsChecked="True"
+                                             ToolTip="Place label above the horizontal grid line (bottom edge of text touches grid)."/>
+                                <RadioButton x:Name="RbAlignBelow"
+                                             Content="Below grid"
+                                             GroupName="VerticalAlign"
+                                             ToolTip="Place label below the horizontal grid line (top edge of text touches grid)."/>
+                            </DockPanel>
+                            <DockPanel Margin="0,2,0,0">
+                                <TextBlock Text="Horizontal:"
+                                           VerticalAlignment="Center"
+                                           FontWeight="Normal"
+                                           Width="80"/>
+                                <RadioButton x:Name="RbAlignRight"
+                                             Content="Right of grid"
+                                             GroupName="HorizontalAlign"
+                                             IsChecked="True"
+                                             ToolTip="Place label to the right of the vertical grid line (left edge of text touches grid)."/>
+                                <RadioButton x:Name="RbAlignLeft"
+                                             Content="Left of grid"
+                                             GroupName="HorizontalAlign"
+                                             ToolTip="Place label to the left of the vertical grid line (right edge of text touches grid)."/>
+                            </DockPanel>
+
+                            <CheckBox x:Name="CkRotateDiagonal"
+                                      Content="Rotate labels on diagonal grids"
+                                      IsChecked="True"
+                                      Margin="0,6,0,0"
+                                      ToolTip="Rotate labels to align with the grid direction at diagonal intersections."/>
+
+                            <Separator Margin="0,8,0,6"/>
+
+                            <!-- Offset controls -->
                             <DockPanel>
                                 <CheckBox x:Name="CkOffsetAuto"
                                           Content="Auto"
@@ -168,7 +213,7 @@
                                           DockPanel.Dock="Right"
                                           Checked="OffsetAuto_Changed"
                                           Unchecked="OffsetAuto_Changed"
-                                          ToolTip="Automatically scale offset based on view scale."/>
+                                          ToolTip="Automatically scale padding based on view scale."/>
                                 <TextBlock Text="Offset mode:"
                                            VerticalAlignment="Center"
                                            FontWeight="Normal"

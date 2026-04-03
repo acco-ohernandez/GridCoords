@@ -60,7 +60,18 @@ CheckBox, Button, NumericInput styles).
     and diagonal token assignment explanation
 
 [Expander: Placement Options]
-  - Checkbox: "Auto offset" (default ON, scales with View.Scale)
+  Label Alignment section:
+  - Vertical: Above grid (default) | Below grid
+    Above = bottom edge of text touches horizontal grid
+    Below = top edge of text touches horizontal grid
+  - Horizontal: Right of grid (default) | Left of grid
+    Right = left edge of text touches vertical grid
+    Left = right edge of text touches vertical grid
+  - Checkbox: "Rotate labels on diagonal grids" (default ON)
+    Rotates text to align with the H-token grid direction
+
+  Offset section:
+  - Checkbox: "Auto" (default ON, scales padding with View.Scale)
   - Offset X / Offset Y numeric inputs (paper inches, converted
     to model units: modelOffset = paperInches * view.Scale / 12)
   - Manual inputs disabled when Auto is checked
@@ -73,6 +84,8 @@ CheckBox, Button, NumericInput styles).
   - Identification via Extensible Storage schema on each element
 
 ── RIGHT COLUMN: Grids + Results ──────────────────────────────
+
+Right column wrapped in ScrollViewer for overflow handling.
 
 [View Info Bar]
   - View name (italic, gray) + Refresh button
@@ -150,11 +163,30 @@ Data model:
   - GridGroup: collection, label, angle, classification, SelectAll
   - IntersectionPairing: two groups + enable flag + token assignment
   - PairingSnapshot: lightweight UI-thread capture for ExternalEvent
+    includes group angles + IsOrthogonalPairing flag
 
 Hybrid UI approach:
   - H and V groups use XAML-defined expanders (backward compatible)
   - Non-standard groups use DynamicGroupsContainer (StackPanel)
   - All groups stored in _allGridGroups list for unified logic
+
+── SMART LABEL PLACEMENT ──────────────────────────────────────
+
+BBox-based alignment (post-placement adjustment):
+  1. Create element at exact intersection point
+  2. doc.Regenerate() to ensure BoundingBox is computed
+  3. Measure element bbox edge distances from intersection
+  4. Compute alignment move vector:
+     - Auto: align specified edge to grid line + 1/32" padding
+     - Manual: apply user-specified X/Y offsets (axis-aligned)
+  5. For diagonal grids (when rotation enabled):
+     - Compute rotation angle from H-grid tangent via atan2
+     - Constrain to ±90° for readability (never upside down)
+     - Rotate alignment vector by same angle
+     - Rotate element via ElementTransformUtils.RotateElement
+  6. Move element via ElementTransformUtils.MoveElement
+
+Works identically for TextNote and FamilyInstance.
 
 ── CORE LOGIC (inside ExternalEvent HandlerAction) ────────────
 
@@ -167,8 +199,7 @@ Hybrid UI approach:
 4. Filter to crop region: if view.CropBoxActive, test point
    against view.CropBox BoundingBoxXYZ min/max (simple rect)
 5. Handle existing labels per user setting (query ES schema)
-6. Place TextNote.Create(doc, viewId, xyz+offset, label, typeId)
-   or doc.Create.NewFamilyInstance(xyz, symbol, view) + set param
+6. Place element at intersection, measure bbox, align, rotate, move
 7. Tag each placed element with Extensible Storage:
      Schema GUID: A1B2C3D4-E5F6-7890-ABCD-EF1234567890
      Fields: ViewIdStr (string), HGridName (string), VGridName (string)

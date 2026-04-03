@@ -6,7 +6,7 @@ A Revit add-in that automatically places coordinate labels at every grid interse
 
 When working in a floor plan, ceiling plan, or area plan, GridCoords detects all visible grids, finds where they cross, and places a label at each intersection point. For example, if horizontal grid "A" crosses vertical grid "3", the tool places a label reading **(A,3)** at that location.
 
-The tool supports grids at any angle — not just orthogonal grids. Diagonal and curved grids are automatically detected, grouped by angle, and paired for intersection labeling.
+The tool supports grids at any angle — not just orthogonal grids. Diagonal and curved grids are automatically detected, grouped by angle, and paired for intersection labeling. Labels on diagonal grids are rotated to align with the grid direction for clean, readable results.
 
 This automates what would otherwise be a tedious manual task of identifying and labeling every grid intersection for coordination drawings.
 
@@ -29,8 +29,15 @@ This automates what would otherwise be a tedious manual task of identifying and 
 - **Preview** — Shows a live example of what labels will look like using actual grid names from the first enabled pairing.
 
 **Placement Options**
-- **Auto offset** — When checked, the tool automatically offsets labels from the exact intersection point so they don't sit directly on the grid lines. The offset scales with your view scale.
-- **Offset X / Offset Y** — Manual offset values in paper inches. Only editable when Auto is unchecked.
+
+*Label Alignment* — Controls which side of the grid lines the label is placed on:
+- **Vertical: Above grid / Below grid** — "Above" places the label so its bottom edge touches the horizontal grid line (label sits above). "Below" places it so its top edge touches the horizontal grid line (label sits below).
+- **Horizontal: Right of grid / Left of grid** — "Right" places the label so its left edge touches the vertical grid line. "Left" places it so its right edge touches the vertical grid line.
+- **Rotate labels on diagonal grids** — When checked, labels at diagonal grid intersections are rotated to align with the "more horizontal" grid direction. This keeps labels readable and visually aligned with the grid lines. The alignment (above/below, right/left) is applied relative to the rotated grid direction.
+
+*Offset* — Controls the spacing between the label edge and the grid line:
+- **Auto** — When checked, the tool uses a small padding (1/32" paper scale) that scales with the view scale. This produces tight, clean placement.
+- **Offset X / Offset Y** — Manual offset values in paper inches. Only editable when Auto is unchecked. Manual offsets are always applied in screen X/Y directions (axis-aligned), even for rotated diagonal labels.
 
 **Existing Labels**
 - **Delete existing labels first** — Removes all labels previously placed by this tool before placing new ones. This is the default.
@@ -84,3 +91,4 @@ Revit 2022, 2023, 2024, 2025, and 2026.
 - Grid names are sorted naturally (1, 2, 3, ... 10, 11 rather than 1, 10, 11, 2).
 - The grid list and view name auto-refresh when you switch to a different view.
 - Grids are classified by computing their angle relative to the view's horizontal direction, using a 10-degree tolerance for clustering. Parallel grids always end up in the same group regardless of their line direction vector.
+- Label placement uses post-creation bounding box measurement for precise edge alignment. The element is created at the intersection, its dimensions are measured, then it is moved to the correct position and optionally rotated.
