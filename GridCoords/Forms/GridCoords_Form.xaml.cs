@@ -31,6 +31,7 @@ namespace GridCoords.Forms
         private bool _suppressSelectAllEvents;
 
         // ── Scope state ──
+        private string _pendingParameterRestore;
         private List<ElementId> _pickedGridIds = new List<ElementId>();
         private HashSet<ElementId> _lastSelectionIds = new HashSet<ElementId>();
 
@@ -173,6 +174,11 @@ namespace GridCoords.Forms
 
         private void PopulateDropdowns(Document doc)
         {
+            // Save current selections by ElementId so we can restore them
+            var prevTextTypeId = (CmbTextNoteTypes.SelectedItem as TextNoteType)?.Id;
+            var prevFamilyTypeId = (CmbFamilyTypes.SelectedItem as FamilySymbol)?.Id;
+            _pendingParameterRestore = (CmbParameters.SelectedItem as ParameterItem)?.Name;
+
             // TextNoteTypes
             var textTypes = new FilteredElementCollector(doc)
                 .OfClass(typeof(TextNoteType))
@@ -180,7 +186,11 @@ namespace GridCoords.Forms
                 .OrderBy(t => t.Name)
                 .ToList();
             CmbTextNoteTypes.ItemsSource = textTypes;
-            if (textTypes.Count > 0) CmbTextNoteTypes.SelectedIndex = 0;
+            // Restore previous selection, or default to first
+            int restoredTextIdx = prevTextTypeId != null
+                ? textTypes.FindIndex(t => t.Id.Equals(prevTextTypeId))
+                : -1;
+            CmbTextNoteTypes.SelectedIndex = restoredTextIdx >= 0 ? restoredTextIdx : (textTypes.Count > 0 ? 0 : -1);
 
             // Generic Annotation family types
             var annotationTypes = new FilteredElementCollector(doc)
@@ -191,7 +201,11 @@ namespace GridCoords.Forms
                 .ThenBy(s => s.Name)
                 .ToList();
             CmbFamilyTypes.ItemsSource = annotationTypes;
-            if (annotationTypes.Count > 0) CmbFamilyTypes.SelectedIndex = 0;
+            // Restore previous selection, or default to first
+            int restoredFamilyIdx = prevFamilyTypeId != null
+                ? annotationTypes.FindIndex(s => s.Id.Equals(prevFamilyTypeId))
+                : -1;
+            CmbFamilyTypes.SelectedIndex = restoredFamilyIdx >= 0 ? restoredFamilyIdx : (annotationTypes.Count > 0 ? 0 : -1);
         }
 
         private void PopulateParametersForFamily(Document doc, FamilySymbol symbol)
@@ -226,8 +240,14 @@ namespace GridCoords.Forms
                 }
             }
 
-            CmbParameters.ItemsSource = paramItems.OrderBy(p => p.Name).ToList();
-            if (paramItems.Count > 0) CmbParameters.SelectedIndex = 0;
+            var sortedParams = paramItems.OrderBy(p => p.Name).ToList();
+            CmbParameters.ItemsSource = sortedParams;
+            // Restore previously selected parameter if available
+            int restoredParamIdx = _pendingParameterRestore != null
+                ? sortedParams.FindIndex(p => p.Name == _pendingParameterRestore)
+                : -1;
+            CmbParameters.SelectedIndex = restoredParamIdx >= 0 ? restoredParamIdx : (sortedParams.Count > 0 ? 0 : -1);
+            _pendingParameterRestore = null;
         }
 
         // ── Grid data collection ──
