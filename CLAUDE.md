@@ -3,7 +3,7 @@ Subject: C# Revit API — "GridCoords" Add-in
 Project:  C:\Visual Studio Files\GridCoords
 Entry:    GridCoords\Cmd_GridCoords.cs (IExternalCommand)
 WPF:      GridCoords\Forms\GridCoords_Form.xaml (modeless)
-Handler:  GridCoords\Common\GridCoords_EventHandler.cs (new)
+Handler:  GridCoords\Common\GridCoords_EventHandler.cs
 Target:   Revit 2022–2026 (multi-target via csproj)
 
 ── ARCHITECTURE ───────────────────────────────────────────────
@@ -22,10 +22,11 @@ Follow the exact modeless pattern from the AutoTagger:
     └─ Finally: clear HandlerAction = null
 
   GridCoords_Form (modeless WPF Window)
-    ├─ Constructor receives: UIApplication, ExternalEvent, handler
+    ├─ Constructor receives: UIApplication, ExternalEvent, handler,
+    │   initial grid data, view name, view ID
     ├─ Loaded event: position window center-right of Revit
-    ├─ ComponentDispatcher.ThreadIdle: detect view changes,
-    │   refresh grid list + update title/status with view name
+    ├─ ComponentDispatcher.ThreadIdle: detect view changes +
+    │   selection changes (for "Selected Grids" scope mode)
     ├─ All Revit API writes go through ExternalEvent.Raise()
     └─ Closed event: unsubscribe ThreadIdle, dispose
 
@@ -33,7 +34,7 @@ Follow the exact modeless pattern from the AutoTagger:
 
 Topmost=True, ResizeMode=CanResize, WindowStartupLocation=Manual
 Two-column layout with Expander sections.
-Style resources matching AutoTagger (Expander, RadioButton, 
+Style resources matching AutoTagger (Expander, RadioButton,
 CheckBox, Button, NumericInput styles).
 
 ── LEFT COLUMN: Settings ──────────────────────────────────────
@@ -41,7 +42,7 @@ CheckBox, Button, NumericInput styles).
 [Expander: Placement Mode]
   - RadioButton group: TextNote | FamilyInstance
   - If TextNote → ComboBox: available TextNoteTypes in doc
-  - If FamilyInstance → ComboBox: loaded Generic Annotation 
+  - If FamilyInstance → ComboBox: loaded Generic Annotation
     families/types + ComboBox: text parameters on selected type
   - FamilySymbol activation handled before placement:
     if (!symbol.IsActive) symbol.Activate(); doc.Regenerate();
@@ -49,16 +50,18 @@ CheckBox, Button, NumericInput styles).
 [Expander: Label Format]
   - TextBox with token template, default: ({H},{V})
     Tokens: {H} = horizontal grid name, {V} = vertical grid name
+  - Empty template falls back to ({H},{V})
   - RadioButton group: (H,V) or (V,H) order
   - Live preview TextBlock showing example with actual grid names
+  - Comprehensive tooltip on Template label with format examples
 
-[Expander: Placement Options — collapsed by default]
+[Expander: Placement Options]
   - Checkbox: "Auto offset" (default ON, scales with View.Scale)
   - Offset X / Offset Y numeric inputs (paper inches, converted
     to model units: modelOffset = paperInches * view.Scale / 12)
   - Manual inputs disabled when Auto is checked
 
-[Expander: Existing Labels — collapsed by default]
+[Expander: Existing Labels]
   - RadioButton group:
     • Delete existing labels first (default)
     • Skip intersections that already have a label
@@ -67,25 +70,35 @@ CheckBox, Button, NumericInput styles).
 
 ── RIGHT COLUMN: Grids + Results ──────────────────────────────
 
-[Expander: Grids — always expanded, header includes view name]
-  - Refresh button in expander header area
+[View Info Bar]
+  - View name (italic, gray) + Refresh button
   - Auto-refreshes via ThreadIdle when active view changes
-  
-  DataGrid with columns:
-    • Checkbox (toggle-all header)
-    • Grid Name (natural sort via custom IComparer<string>)
-    • Orientation (auto-detected: Horizontal | Vertical | Angled)
-      — editable ComboBox so user can override classification
-    
-  Grid classification logic:
-    • Use gridDir.DotProduct(view.RightDirection):
-      abs ≥ 0.985 (cos 10°) → Horizontal
-      abs ≤ 0.174 (sin 10°) → Vertical
-      else → Angled (excluded by default, user can override)
-    • Curved grids → labeled "Curved", excluded by default
-    
-  Below DataGrid:
-    • TextBlock: "{N} intersections found" (live update)
+
+[Expander: Grid Scope]
+  - RadioButton group:
+    • All Visible Grids (default) — every grid in the view
+    • Currently Selected Grids — filters to Revit selection,
+      auto-refreshes via ThreadIdle on selection change
+    • Pick Grids — Pick/Clear buttons, minimizes form for
+      PickObjects with GridSelectionFilter (ISelectionFilter),
+      shows "{N} picked" count
+  - Scope affects both Place Labels and Delete Labels
+
+[Expander: Horizontal Grids]
+  - Header shows "(N of M)" selection count
+  - Select All checkbox
+  - WrapPanel of checkboxes (compact layout, natural sort)
+
+[Expander: Vertical Grids]
+  - Same layout as Horizontal Grids
+
+[Expander: Angled / Curved — collapsed, hidden when empty]
+  - Only shown when angled/curved grids exist in view
+  - Each grid shows detected orientation + ComboBox to
+    reassign as Horizontal or Vertical
+
+[Intersection Count]
+  - "{N} intersections  (H x V)" with live math breakdown
 
 [Expander: Results — starts Collapsed, shown after execution]
   Grid layout:
@@ -101,25 +114,29 @@ Three buttons centered:
   [Place Labels]  [Delete Labels]  [Close]
 
   • Place Labels → ExternalEvent: run intersection logic, place
-  • Delete Labels → ExternalEvent: query ES schema in current 
-    view, delete found elements, update Results
+  • Delete Labels → ExternalEvent: scope-aware deletion,
+    only deletes labels matching displayed grids when using
+    Selected/Pick scope (deletes all in All Visible mode)
   • Close → close form
+  • Buttons disable during execution, re-enable on complete
 
-Status TextBlock below: "Ready." / "Working…" / "12 placed."
+Status TextBlock below: "Ready." / "Placing labels…" / "12 placed."
 
 ── CORE LOGIC (inside ExternalEvent HandlerAction) ────────────
 
-1. Collect checked grids, separate into H and V groups
+1. Collect checked grids from H and V lists (+ reassigned Others)
 2. For every H×V pair: Curve.Intersect(otherCurve, out results)
    — check SetComparisonResult, extract XYZ from results
-3. Filter to crop region: if view.CropBoxActive, test point 
+   — Curve.Intersect deprecated in 2026, suppressed via #pragma
+3. Filter to crop region: if view.CropBoxActive, test point
    against view.CropBox BoundingBoxXYZ min/max (simple rect)
 4. Handle existing labels per user setting (query ES schema)
 5. Place TextNote.Create(doc, viewId, xyz+offset, label, typeId)
    or doc.Create.NewFamilyInstance(xyz, symbol, view) + set param
 6. Tag each placed element with Extensible Storage:
-     Schema GUID: (generate one stable GUID)
-     Fields: ViewId (int), HGridName (string), VGridName (string)
+     Schema GUID: A1B2C3D4-E5F6-7890-ABCD-EF1234567890
+     Fields: ViewIdStr (string), HGridName (string), VGridName (string)
+     ViewId stored as string for multi-version compatibility
 7. Dispatcher.BeginInvoke → update Results panel + status
 
 ── TRANSACTION & ERROR HANDLING ───────────────────────────────
@@ -129,21 +146,39 @@ Status TextBlock below: "Ready." / "Working…" / "12 placed."
     • Active view is plan/ceiling plan/area plan
     • At least one H and one V grid are checked
     • If FamilyInstance mode: symbol loaded + parameter exists
+    • Template field: falls back to ({H},{V}) if empty
+    • TagElement: null-guarded against failed element creation
 - All errors surface in Results panel — no modal TaskDialogs
   (form is modeless, stay non-blocking)
 
-── FILES TO CREATE/MODIFY ─────────────────────────────────────
+── WPF INITIALIZATION SAFETY ─────────────────────────────────
 
-  Modify: Cmd_GridCoords.cs (static form, ExternalEvent setup)
-  Modify: Forms\GridCoords_Form.xaml (full layout)
-  Modify: Forms\GridCoords_Form.xaml.cs (code-behind + logic)
-  Create: Common\GridCoords_EventHandler.cs
-  Modify: Common\Utils.cs (add PositionWindowCenterRight)
+All methods called during constructor that touch XAML controls
+must include null guards (controls don't exist until after
+InitializeComponent completes XAML parsing):
+  • UpdateFormatPreview()
+  • UpdateExpanderHeaders()
+  • UpdateIntersectionCount()
+  • DistributeGrids()
+
+── FILES ──────────────────────────────────────────────────────
+
+  GridCoords\Cmd_GridCoords.cs          — IExternalCommand, static form
+  GridCoords\Forms\GridCoords_Form.xaml — Two-column WPF layout
+  GridCoords\Forms\GridCoords_Form.xaml.cs — Code-behind + all logic
+  GridCoords\Common\GridCoords_EventHandler.cs — IExternalEventHandler
+  GridCoords\Common\Utils.cs            — PositionWindowCenterRight,
+                                          NaturalSortCompare
 
 ── CODE QUALITY ───────────────────────────────────────────────
 
 - Code-behind pattern (no MVVM — matches AutoTagger)
-- Multi-version safe: use TextNote.Create 5-param overload,
+- Multi-version safe: TextNote.Create 5-param overload,
+  ElementId.ToString() instead of IntegerValue,
   standard Extensible Storage API, all stable 2022–2026
+- Type aliases to avoid ambiguity:
+    RevitGrid = Autodesk.Revit.DB.Grid
+    WinVisibility = System.Windows.Visibility
 - Natural sort comparer for grid names
 - Clean ThreadIdle unsubscribe on form close
+- GridSelectionFilter (ISelectionFilter) for Pick Grids mode

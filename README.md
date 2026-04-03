@@ -21,7 +21,7 @@ This automates what would otherwise be a tedious manual task of identifying and 
 - **Family Instance** — Places a Generic Annotation family at each intersection. Choose the family type and which text parameter should receive the label text.
 
 **Label Format**
-- **Template** — Controls what the label looks like. The default is `({H},{V})` where `{H}` is replaced with the horizontal grid name and `{V}` with the vertical grid name.
+- **Template** — Controls what the label looks like. The default is `({H},{V})` where `{H}` is replaced with the horizontal grid name and `{V}` with the vertical grid name. Hover over the "Template:" label for format examples. If left empty, defaults to `({H},{V})`.
 - **Order** — Choose whether horizontal or vertical grid names come first.
 - **Preview** — Shows a live example of what labels will look like using actual grid names from your view.
 
@@ -36,17 +36,24 @@ This automates what would otherwise be a tedious manual task of identifying and 
 
 ### Grids (Right Side)
 
-The grid list shows all grids visible in the current view. Each grid is automatically classified as **Horizontal**, **Vertical**, **Angled**, or **Curved** based on its direction.
+**Grid Scope** — Controls which grids appear in the lists below:
+- **All Visible Grids** — Shows every grid in the current view. This is the default.
+- **Currently Selected Grids** — Only shows grids you've selected in Revit. The list auto-updates as you select different grids in the canvas.
+- **Pick Grids** — Click the "Pick" button, then click individual grids in Revit. Press Finish or Escape when done. Only the picked grids will appear. Use "Clear" to reset.
 
-- Use the **checkboxes** to include or exclude specific grids.
-- Use the **Orientation dropdown** to override the auto-detected classification (e.g., reclassify an angled grid as Horizontal).
-- The **intersection count** at the bottom updates as you check/uncheck grids.
-- The list **auto-refreshes** when you switch to a different view.
+**Horizontal Grids** and **Vertical Grids** — Grids are automatically classified by their direction and separated into two groups. Each group has:
+- A **Select All** checkbox to quickly toggle all grids in that group.
+- Individual checkboxes displayed in a compact wrap layout.
+- A header showing how many grids are selected (e.g., "Horizontal Grids (5 of 5)").
+
+**Angled / Curved** — If any grids are detected at an angle (not aligned with the view's axes) or are curved, they appear in a separate collapsed section. You can reassign them as Horizontal or Vertical using the dropdown next to each grid name.
+
+**Intersection Count** — Shows the total intersections that will be labeled, with the math breakdown (e.g., "25 intersections (5 H x 5 V)").
 
 ### Action Buttons (Bottom)
 
 - **Place Labels** — Calculates all intersections and places labels in the active view.
-- **Delete Labels** — Removes all labels placed by this tool in the active view.
+- **Delete Labels** — Removes labels placed by this tool. When using "Currently Selected Grids" or "Pick Grids" scope, only deletes labels for the grids shown in the form. When using "All Visible Grids", deletes all labels in the view.
 - **Close** — Closes the window.
 
 ### Results
@@ -64,6 +71,7 @@ Revit 2022, 2023, 2024, 2025, and 2026.
 ## Notes
 
 - The tool window stays open (modeless) so you can continue working in Revit while it's displayed.
-- Labels placed by this tool are tracked internally, so the Delete function only removes labels created by Grid Coords — not other text notes or annotations in the view.
+- Labels placed by this tool are tracked internally using Extensible Storage, so the Delete function only removes labels created by Grid Coords — not other text notes or annotations in the view.
 - If the view has a crop region active, only intersections inside the crop boundary will receive labels.
 - Grid names are sorted naturally (1, 2, 3, ... 10, 11 rather than 1, 10, 11, 2).
+- The grid list and view name auto-refresh when you switch to a different view.

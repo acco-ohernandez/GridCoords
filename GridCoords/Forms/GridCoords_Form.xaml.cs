@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Autodesk.Revit.DB.ExtensibleStorage;
+using Autodesk.Revit.UI.Selection;
 using GridCoords.Common;
 using RevitGrid = Autodesk.Revit.DB.Grid;
 using WinVisibility = System.Windows.Visibility;
@@ -28,6 +29,10 @@ namespace GridCoords.Forms
         private readonly ObservableCollection<GridRowItem> _otherGridItems = new ObservableCollection<GridRowItem>();
         private ElementId _lastViewId;
         private bool _suppressSelectAllEvents;
+
+        // ── Scope state ──
+        private List<ElementId> _pickedGridIds = new List<ElementId>();
+        private HashSet<ElementId> _lastSelectionIds = new HashSet<ElementId>();
 
         // ── Extensible Storage schema ──
         private static readonly Guid SchemaGuid = new Guid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890");
@@ -138,11 +143,24 @@ namespace GridCoords.Forms
                 var uidoc = _uiApp.ActiveUIDocument;
                 if (uidoc == null) return;
 
+                // Detect view change → always refresh
                 var currentViewId = uidoc.ActiveView?.Id;
                 if (currentViewId != null && !currentViewId.Equals(_lastViewId))
                 {
                     _lastViewId = currentViewId;
                     RefreshGridList();
+                    return;
+                }
+
+                // In "Selected Grids" mode, detect selection changes
+                if (RbScopeSelected?.IsChecked == true)
+                {
+                    var currentSelIds = new HashSet<ElementId>(uidoc.Selection.GetElementIds());
+                    if (!currentSelIds.SetEquals(_lastSelectionIds))
+                    {
+                        _lastSelectionIds = currentSelIds;
+                        RefreshGridList();
+                    }
                 }
             }
             catch
@@ -214,11 +232,15 @@ namespace GridCoords.Forms
 
         // ── Grid data collection ──
 
-        public static List<GridRowItem> CollectGridData(Document doc, View view)
+        /// <summary>
+        /// Collect grid data from the view. If filterIds is provided, only include grids with those IDs.
+        /// </summary>
+        public static List<GridRowItem> CollectGridData(Document doc, View view, HashSet<ElementId> filterIds = null)
         {
             var grids = new FilteredElementCollector(doc, view.Id)
                 .OfClass(typeof(RevitGrid))
                 .Cast<RevitGrid>()
+                .Where(g => filterIds == null || filterIds.Contains(g.Id))
                 .ToList();
 
             var viewRight = view.RightDirection;
@@ -264,6 +286,12 @@ namespace GridCoords.Forms
 
         private void RefreshGridList()
         {
+            // Capture scope mode on UI thread before raising event
+            bool scopeAll = RbScopeAllVisible?.IsChecked == true;
+            bool scopeSelected = RbScopeSelected?.IsChecked == true;
+            bool scopePick = RbScopePick?.IsChecked == true;
+            var pickedIds = new HashSet<ElementId>(_pickedGridIds);
+
             _handler.HandlerAction = app =>
             {
                 var uidoc = app.ActiveUIDocument;
@@ -271,7 +299,27 @@ namespace GridCoords.Forms
                 var doc = uidoc.Document;
                 var view = uidoc.ActiveView;
 
-                var newItems = CollectGridData(doc, view);
+                // Determine filter based on scope
+                HashSet<ElementId> filterIds = null;
+                if (scopeSelected)
+                {
+                    // Only grids in the current Revit selection
+                    var selIds = uidoc.Selection.GetElementIds();
+                    var gridIds = new HashSet<ElementId>();
+                    foreach (var id in selIds)
+                    {
+                        var elem = doc.GetElement(id);
+                        if (elem is RevitGrid) gridIds.Add(id);
+                    }
+                    filterIds = gridIds;
+                }
+                else if (scopePick)
+                {
+                    filterIds = pickedIds.Count > 0 ? pickedIds : null;
+                }
+                // scopeAll → filterIds stays null (no filter)
+
+                var newItems = CollectGridData(doc, view, filterIds);
                 var viewName = view.Name;
                 var viewId = view.Id;
 
@@ -349,6 +397,8 @@ namespace GridCoords.Forms
 
         private static void TagElement(Element element, string viewIdStr, string hName, string vName)
         {
+            if (element == null) return;
+
             var schema = GetOrCreateSchema();
             var entity = new Entity(schema);
             entity.Set<string>(FieldViewId, viewIdStr);
@@ -445,7 +495,7 @@ namespace GridCoords.Forms
                 selectedTextType = CmbTextNoteTypes.SelectedItem as TextNoteType;
                 selectedSymbol = CmbFamilyTypes.SelectedItem as FamilySymbol;
                 selectedParam = CmbParameters.SelectedItem as ParameterItem;
-                labelTemplate = TxtLabelTemplate.Text ?? "({H},{V})";
+                labelTemplate = string.IsNullOrWhiteSpace(TxtLabelTemplate.Text) ? "({H},{V})" : TxtLabelTemplate.Text;
                 orderHV = RbOrderHV.IsChecked == true;
                 autoOffset = CkOffsetAuto.IsChecked == true;
                 double.TryParse(TxtOffsetX.Text, out offsetX);
@@ -652,6 +702,26 @@ namespace GridCoords.Forms
             var doc = app.ActiveUIDocument.Document;
             var view = app.ActiveUIDocument.ActiveView;
 
+            // Capture which grid names are currently in the form
+            HashSet<string> hNames = null;
+            HashSet<string> vNames = null;
+            bool scopeAll = true;
+
+            Dispatcher.Invoke(() =>
+            {
+                scopeAll = RbScopeAllVisible?.IsChecked == true;
+                if (!scopeAll)
+                {
+                    // Only delete labels whose grid names match what's shown in the form
+                    hNames = new HashSet<string>(
+                        _hGridItems.Select(g => g.GridName)
+                        .Concat(_otherGridItems.Where(g => g.Orientation == "Horizontal").Select(g => g.GridName)));
+                    vNames = new HashSet<string>(
+                        _vGridItems.Select(g => g.GridName)
+                        .Concat(_otherGridItems.Where(g => g.Orientation == "Vertical").Select(g => g.GridName)));
+                }
+            });
+
             int deletedCount = 0;
 
             using (Transaction tx = new Transaction(doc, "GridCoords: Delete Labels"))
@@ -660,6 +730,21 @@ namespace GridCoords.Forms
                 try
                 {
                     var tagged = FindTaggedElements(doc, view);
+
+                    // Filter to only labels matching the current scope's grids
+                    if (!scopeAll && hNames != null && vNames != null)
+                    {
+                        var schema = Schema.Lookup(SchemaGuid);
+                        tagged = tagged.Where(elem =>
+                        {
+                            var entity = elem.GetEntity(schema);
+                            if (!entity.IsValid()) return false;
+                            string h = entity.Get<string>(FieldHGridName);
+                            string v = entity.Get<string>(FieldVGridName);
+                            return hNames.Contains(h) && vNames.Contains(v);
+                        }).ToList();
+                    }
+
                     deletedCount = tagged.Count;
                     foreach (var elem in tagged)
                         doc.Delete(elem.Id);
@@ -803,6 +888,74 @@ namespace GridCoords.Forms
             UpdateFormatPreview();
         }
 
+        // ── Scope event handlers ──
+
+        private void GridScope_Changed(object sender, RoutedEventArgs e)
+        {
+            if (BtnPick == null || BtnClearPick == null) return;
+
+            bool pickMode = RbScopePick.IsChecked == true;
+            BtnPick.IsEnabled = pickMode;
+            BtnClearPick.IsEnabled = pickMode;
+
+            // Refresh the grid list to apply the new scope
+            RefreshGridList();
+        }
+
+        private void BtnPick_Click(object sender, RoutedEventArgs e)
+        {
+            // Minimize form, let user pick grids, then restore
+            this.WindowState = WindowState.Minimized;
+
+            _handler.HandlerAction = app =>
+            {
+                var uidoc = app.ActiveUIDocument;
+                if (uidoc == null) return;
+
+                try
+                {
+                    var refs = uidoc.Selection.PickObjects(
+                        ObjectType.Element,
+                        new GridSelectionFilter(),
+                        "Select grids, then press Finish or Escape.");
+
+                    _pickedGridIds = refs.Select(r => r.ElementId).ToList();
+                }
+                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                {
+                    // User pressed Escape — keep previous picks
+                }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    this.WindowState = WindowState.Normal;
+                    this.Activate();
+
+                    // Update pick count label
+                    if (_pickedGridIds.Count > 0)
+                    {
+                        TblPickCount.Text = $"{_pickedGridIds.Count} picked";
+                        TblPickCount.Visibility = WinVisibility.Visible;
+                    }
+                    else
+                    {
+                        TblPickCount.Visibility = WinVisibility.Collapsed;
+                    }
+
+                    // Refresh with picked grids
+                    RefreshGridList();
+                }));
+            };
+            _externalEvent.Raise();
+        }
+
+        private void BtnClearPick_Click(object sender, RoutedEventArgs e)
+        {
+            _pickedGridIds.Clear();
+            TblPickCount.Visibility = WinVisibility.Collapsed;
+            RefreshGridList();
+        }
+
         private void BtnRefreshGrids_Click(object sender, RoutedEventArgs e)
         {
             SetStatus("Refreshing grids...");
@@ -900,5 +1053,14 @@ namespace GridCoords.Forms
     {
         public string Name { get; set; }
         public Definition ParamDefinition { get; set; }
+    }
+
+    /// <summary>
+    /// Selection filter that only allows Grid elements to be picked.
+    /// </summary>
+    public class GridSelectionFilter : ISelectionFilter
+    {
+        public bool AllowElement(Element elem) => elem is RevitGrid;
+        public bool AllowReference(Reference reference, XYZ position) => false;
     }
 }

@@ -119,7 +119,8 @@
                                 <TextBlock Text="Template:"
                                            Width="70"
                                            VerticalAlignment="Center"
-                                           FontWeight="Normal"/>
+                                           FontWeight="Normal"
+                                           ToolTip="Define the label format using tokens:&#x0a;&#x0a;  {H} = Horizontal grid name&#x0a;  {V} = Vertical grid name&#x0a;&#x0a;Examples:&#x0a;  ({H},{V})      →  (A,3)&#x0a;  {H}-{V}        →  A-3&#x0a;  {H}/{V}        →  A/3&#x0a;  Grid {H}.{V}   →  Grid A.3&#x0a;  [{V},{H}]      →  [3,A]&#x0a;&#x0a;Use the Order setting below to swap&#x0a;which grid name fills {H} vs {V}."/>
                                 <TextBox x:Name="TxtLabelTemplate"
                                          Text="({H},{V})"
                                          FontWeight="Normal"
@@ -232,6 +233,7 @@
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
@@ -254,8 +256,52 @@
                                Foreground="Gray"/>
                 </DockPanel>
 
+                <!-- ── GRID SCOPE ─────────────────────────────── -->
+                <Expander Grid.Row="1" Header="Grid Scope">
+                    <StackPanel Margin="2,4">
+                        <RadioButton x:Name="RbScopeAllVisible"
+                                     Content="All Visible Grids"
+                                     GroupName="GridScope"
+                                     IsChecked="True"
+                                     Checked="GridScope_Changed"/>
+                        <RadioButton x:Name="RbScopeSelected"
+                                     Content="Currently Selected Grids"
+                                     GroupName="GridScope"
+                                     Checked="GridScope_Changed"
+                                     ToolTip="Uses grids currently selected in Revit. Auto-refreshes when selection changes."/>
+                        <DockPanel Margin="0,2,0,0">
+                            <RadioButton x:Name="RbScopePick"
+                                         Content="Pick Grids"
+                                         GroupName="GridScope"
+                                         DockPanel.Dock="Left"
+                                         Checked="GridScope_Changed"/>
+                            <StackPanel Orientation="Horizontal"
+                                        DockPanel.Dock="Right"
+                                        HorizontalAlignment="Right">
+                                <Button x:Name="BtnPick"
+                                        Content="Pick"
+                                        IsEnabled="False"
+                                        Click="BtnPick_Click"
+                                        ToolTip="Click grids in the Revit canvas to select them"/>
+                                <Button x:Name="BtnClearPick"
+                                        Content="Clear"
+                                        IsEnabled="False"
+                                        Click="BtnClearPick_Click"
+                                        Margin="4,0,0,0"/>
+                                <TextBlock x:Name="TblPickCount"
+                                           Visibility="Collapsed"
+                                           VerticalAlignment="Center"
+                                           Foreground="Gray"
+                                           FontStyle="Italic"
+                                           FontWeight="Normal"
+                                           Margin="6,0,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </Expander>
+
                 <!-- ── HORIZONTAL GRIDS ───────────────────────── -->
-                <Expander Grid.Row="1" x:Name="ExpanderHGrids" Header="Horizontal Grids">
+                <Expander Grid.Row="2" x:Name="ExpanderHGrids" Header="Horizontal Grids">
                     <DockPanel Margin="2,4">
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                             <CheckBox x:Name="CkSelectAllH"
@@ -287,7 +333,7 @@
                 </Expander>
 
                 <!-- ── VERTICAL GRIDS ─────────────────────────── -->
-                <Expander Grid.Row="2" x:Name="ExpanderVGrids" Header="Vertical Grids">
+                <Expander Grid.Row="3" x:Name="ExpanderVGrids" Header="Vertical Grids">
                     <DockPanel Margin="2,4">
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                             <CheckBox x:Name="CkSelectAllV"
@@ -319,7 +365,7 @@
                 </Expander>
 
                 <!-- ── ANGLED / CURVED GRIDS ──────────────────── -->
-                <Expander Grid.Row="3" x:Name="ExpanderOtherGrids"
+                <Expander Grid.Row="4" x:Name="ExpanderOtherGrids"
                           Header="Angled / Curved (excluded)"
                           IsExpanded="False"
                           Visibility="Collapsed">
@@ -355,7 +401,7 @@
 
                 <!-- ── INTERSECTION COUNT ─────────────────────── -->
                 <TextBlock x:Name="TblIntersectionCount"
-                           Grid.Row="4"
+                           Grid.Row="5"
                            Text="0 intersections found"
                            FontWeight="Normal"
                            FontStyle="Italic"
@@ -365,7 +411,7 @@
                 <!-- ── RESULTS ────────────────────────────────── -->
                 <Expander x:Name="ResultsExpander"
                           Header="Results"
-                          Grid.Row="5"
+                          Grid.Row="6"
                           Visibility="Collapsed">
                     <Grid Margin="6,4">
                         <Grid.ColumnDefinitions>
