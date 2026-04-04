@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -23,10 +24,9 @@ namespace GridCoords.Forms
         private readonly GridCoords_EventHandler _handler;
         private IntPtr _revitHandle;
 
-        // ── State: three separate lists for H, V, and Other grids (used by XAML-bound standard groups) ──
+        // ── State: observable collections for H and V grids (bound to XAML-defined ItemsControls) ──
         private readonly ObservableCollection<GridRowItem> _hGridItems = new ObservableCollection<GridRowItem>();
         private readonly ObservableCollection<GridRowItem> _vGridItems = new ObservableCollection<GridRowItem>();
-        private readonly ObservableCollection<GridRowItem> _otherGridItems = new ObservableCollection<GridRowItem>();
         private ElementId _lastViewId;
         private bool _suppressSelectAllEvents;
 
@@ -64,10 +64,9 @@ namespace GridCoords.Forms
             _revitHandle = uiApp.MainWindowHandle;
             _lastViewId = viewId;
 
-            // Bind the three ItemsControls
+            // Bind the XAML-defined ItemsControls for standard H/V groups
             HGridList.ItemsSource = _hGridItems;
             VGridList.ItemsSource = _vGridItems;
-            OtherGridList.ItemsSource = _otherGridItems;
 
             // Distribute grids into the three groups
             DistributeGrids(initialGrids);
@@ -90,7 +89,6 @@ namespace GridCoords.Forms
         {
             _hGridItems.Clear();
             _vGridItems.Clear();
-            _otherGridItems.Clear();
             _allGridGroups.Clear();
             _intersectionPairings.Clear();
 
@@ -98,7 +96,7 @@ namespace GridCoords.Forms
             var clusteredGroups = ClusterGridsIntoGroups(allGrids);
             _allGridGroups.AddRange(clusteredGroups);
 
-            // Populate the XAML-bound standard collections for backward compatibility
+            // Populate the XAML-bound standard collections (H/V groups use XAML-defined expanders)
             foreach (var gridGroup in clusteredGroups)
             {
                 if (gridGroup.GroupClassification == "Horizontal")
@@ -111,12 +109,6 @@ namespace GridCoords.Forms
                     foreach (var gridItem in gridGroup.GridItems)
                         _vGridItems.Add(gridItem);
                 }
-                else
-                {
-                    // Diagonal and Curved grids go to the "Other" collection
-                    foreach (var gridItem in gridGroup.GridItems)
-                        _otherGridItems.Add(gridItem);
-                }
             }
 
             // Generate intersection pairings from all groups
@@ -124,11 +116,7 @@ namespace GridCoords.Forms
             foreach (var pairing in generatedPairings)
                 _intersectionPairings.Add(pairing);
 
-            // Show/hide the legacy Angled/Curved section (only for grids not in dynamic expanders)
-            if (ExpanderOtherGrids != null)
-                ExpanderOtherGrids.Visibility = WinVisibility.Collapsed; // Now handled by dynamic expanders
-
-            // Build dynamic UI for non-standard groups
+            // Build dynamic UI for non-standard groups (diagonal, curved)
             BuildDynamicGroupExpanders();
             BuildPairingsUI();
         }
@@ -388,9 +376,10 @@ namespace GridCoords.Forms
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore — Revit may not be ready
+                // Revit may not be ready during startup or shutdown — log but don't surface
+                Debug.WriteLine($"GridCoords ThreadIdle: {ex.Message}");
             }
         }
 
@@ -527,7 +516,6 @@ namespace GridCoords.Forms
                     IsSelected = isSelectedByDefault,
                     GridName = grid.Name,
                     Orientation = orientation,
-                    DetectedOrientation = orientation,
                     AngleFromViewHorizontal = angleFromHorizontalDegrees,
                     GridId = grid.Id
                 });
@@ -1098,7 +1086,12 @@ namespace GridCoords.Forms
                     if (view.CropBoxActive)
                         cropBox = view.CropBox;
 
-                    // Iterate each enabled pairing's grid combinations
+                    // ── Phase 1: Create all elements at intersection points ──
+                    // Elements are created and tagged with Extensible Storage, then queued
+                    // for post-creation alignment. This avoids calling doc.Regenerate() per
+                    // element — instead, one single Regenerate after all creates.
+                    var pendingLabelAlignments = new List<PendingLabelAlignment>();
+
                     foreach (var pairingSnapshot in enabledPairingSnapshots)
                     {
                         var horizontalRevitGrids = pairingSnapshot.HorizontalGridItems
@@ -1144,31 +1137,29 @@ namespace GridCoords.Forms
 
                                         string horizontalGridName = horizontalGrid.Name;
                                         string verticalGridName = verticalGrid.Name;
-                                        string intersectionKey = $"{horizontalGridName}|{verticalGridName}|{intersectionIndex}";
 
-                                        // Skip if existing (use base key without index for backward compatibility)
-                                        string baseIntersectionKey = $"{horizontalGridName}|{verticalGridName}";
-                                        if (skipExisting && existingKeys.Contains(baseIntersectionKey))
+                                        // Skip if an existing label already covers this intersection
+                                        string existingLabelKey = $"{horizontalGridName}|{verticalGridName}";
+                                        if (skipExisting && existingKeys.Contains(existingLabelKey))
                                         {
                                             skippedCount++;
                                             continue;
                                         }
 
-                                        // Build label text
+                                        // Build label text from the template
                                         string labelText;
                                         if (orderHV)
                                             labelText = labelTemplate.Replace("{H}", horizontalGridName).Replace("{V}", verticalGridName);
                                         else
                                             labelText = labelTemplate.Replace("{H}", verticalGridName).Replace("{V}", horizontalGridName);
 
-                                        // ── Create element at the intersection point ──
+                                        // Create element at the raw intersection point (alignment applied in Phase 3)
                                         Element placedElement = null;
 
                                         if (useTextNote)
                                         {
-                                            var textNote = TextNote.Create(doc, view.Id, intersectionPoint,
+                                            placedElement = TextNote.Create(doc, view.Id, intersectionPoint,
                                                 labelText, selectedTextType.Id);
-                                            placedElement = textNote;
                                         }
                                         else
                                         {
@@ -1182,84 +1173,22 @@ namespace GridCoords.Forms
 
                                         if (placedElement == null) continue;
 
-                                        // Regenerate so the bounding box is available
-                                        doc.Regenerate();
+                                        // Tag with Extensible Storage for later identification
+                                        TagElement(placedElement, ViewIdToString(view.Id), horizontalGridName, verticalGridName);
 
-                                        // ── Measure the element's bounding box (before rotation) ──
-                                        BoundingBoxXYZ elementBoundingBox = placedElement.get_BoundingBox(view);
-
-                                        // ── Compute how far each edge of the bbox is from the intersection ──
-                                        double distanceToLeftEdge = elementBoundingBox != null
-                                            ? elementBoundingBox.Min.X - intersectionPoint.X : 0;
-                                        double distanceToRightEdge = elementBoundingBox != null
-                                            ? elementBoundingBox.Max.X - intersectionPoint.X : 0;
-                                        double distanceToBottomEdge = elementBoundingBox != null
-                                            ? elementBoundingBox.Min.Y - intersectionPoint.Y : 0;
-                                        double distanceToTopEdge = elementBoundingBox != null
-                                            ? elementBoundingBox.Max.Y - intersectionPoint.Y : 0;
-
-                                        // ── Compute the alignment move vector ──
-                                        double alignmentMoveX, alignmentMoveY;
-
-                                        if (!autoOffset)
-                                        {
-                                            // Manual mode: use fixed user-specified offsets
-                                            alignmentMoveX = manualModelOffsetX;
-                                            alignmentMoveY = manualModelOffsetY;
-                                        }
-                                        else
-                                        {
-                                            // Auto mode: align edges to grid lines with padding
-                                            if (alignRightOfGrid)
-                                                alignmentMoveX = paddingModelUnits - distanceToLeftEdge;
-                                            else
-                                                alignmentMoveX = -paddingModelUnits - distanceToRightEdge;
-
-                                            if (alignAboveGrid)
-                                                alignmentMoveY = paddingModelUnits - distanceToBottomEdge;
-                                            else
-                                                alignmentMoveY = -paddingModelUnits - distanceToTopEdge;
-                                        }
-
-                                        // ── Rotate for diagonal grids ──
-                                        double rotationAngleRadians = 0;
+                                        // Queue for post-creation alignment (bbox measurement + rotation + move)
                                         bool shouldRotateThisLabel = rotateDiagonalLabels
                                             && !pairingSnapshot.IsOrthogonalPairing;
 
-                                        if (shouldRotateThisLabel)
+                                        pendingLabelAlignments.Add(new PendingLabelAlignment
                                         {
-                                            // Compute rotation angle from the H-token grid's tangent
-                                            XYZ horizontalGridTangent = GetCurveTangentDirection(horizontalCurve);
-                                            rotationAngleRadians = Math.Atan2(horizontalGridTangent.Y, horizontalGridTangent.X);
-
-                                            // Keep text readable (not upside down): constrain to -90° to +90°
-                                            if (rotationAngleRadians > Math.PI / 2.0)
-                                                rotationAngleRadians -= Math.PI;
-                                            if (rotationAngleRadians < -Math.PI / 2.0)
-                                                rotationAngleRadians += Math.PI;
-
-                                            // Rotate the alignment move vector to match the grid direction
-                                            double cosAngle = Math.Cos(rotationAngleRadians);
-                                            double sinAngle = Math.Sin(rotationAngleRadians);
-                                            double rotatedMoveX = alignmentMoveX * cosAngle - alignmentMoveY * sinAngle;
-                                            double rotatedMoveY = alignmentMoveX * sinAngle + alignmentMoveY * cosAngle;
-                                            alignmentMoveX = rotatedMoveX;
-                                            alignmentMoveY = rotatedMoveY;
-
-                                            // Rotate the element around the intersection point
-                                            Line rotationAxis = Line.CreateBound(
-                                                intersectionPoint,
-                                                intersectionPoint + XYZ.BasisZ);
-                                            ElementTransformUtils.RotateElement(
-                                                doc, placedElement.Id, rotationAxis, rotationAngleRadians);
-                                        }
-
-                                        // ── Move element to aligned position ──
-                                        XYZ alignmentMoveVector = new XYZ(alignmentMoveX, alignmentMoveY, 0);
-                                        ElementTransformUtils.MoveElement(doc, placedElement.Id, alignmentMoveVector);
-
-                                        // ── Tag with Extensible Storage ──
-                                        TagElement(placedElement, ViewIdToString(view.Id), horizontalGridName, verticalGridName);
+                                            PlacedElement = placedElement,
+                                            IntersectionPoint = intersectionPoint,
+                                            HorizontalGridCurve = horizontalCurve,
+                                            ShouldRotate = shouldRotateThisLabel,
+                                            HorizontalGridName = horizontalGridName,
+                                            VerticalGridName = verticalGridName
+                                        });
 
                                         placedCount++;
                                     }
@@ -1273,6 +1202,93 @@ namespace GridCoords.Forms
                         }
                     }
 
+                    // ── Phase 2: Single Regenerate to make all bounding boxes available ──
+                    // This replaces per-element Regenerate calls, significantly improving
+                    // performance for large grid counts (e.g., 100+ intersections).
+                    if (pendingLabelAlignments.Count > 0)
+                        doc.Regenerate();
+
+                    // ── Phase 3: Align each element using its bounding box ──
+                    // Measure bbox, compute alignment offset, optionally rotate for diagonal
+                    // grids, then move to final position.
+                    foreach (var pendingAlignment in pendingLabelAlignments)
+                    {
+                        try
+                        {
+                            var placedElement = pendingAlignment.PlacedElement;
+                            var intersectionPoint = pendingAlignment.IntersectionPoint;
+
+                            BoundingBoxXYZ elementBoundingBox = placedElement.get_BoundingBox(view);
+
+                            // Compute how far each edge of the bbox is from the intersection
+                            double distanceToLeftEdge = elementBoundingBox != null
+                                ? elementBoundingBox.Min.X - intersectionPoint.X : 0;
+                            double distanceToRightEdge = elementBoundingBox != null
+                                ? elementBoundingBox.Max.X - intersectionPoint.X : 0;
+                            double distanceToBottomEdge = elementBoundingBox != null
+                                ? elementBoundingBox.Min.Y - intersectionPoint.Y : 0;
+                            double distanceToTopEdge = elementBoundingBox != null
+                                ? elementBoundingBox.Max.Y - intersectionPoint.Y : 0;
+
+                            // Compute the alignment move vector.
+                            // Both modes use bbox edge alignment to position the label on the
+                            // correct side of the grid lines. The difference is the padding:
+                            // Auto mode uses a view-scale-based padding; Manual mode uses the
+                            // user-specified X/Y offsets as the padding distance.
+                            double alignmentMoveX, alignmentMoveY;
+                            double paddingX = autoOffset ? paddingModelUnits : manualModelOffsetX;
+                            double paddingY = autoOffset ? paddingModelUnits : manualModelOffsetY;
+
+                            if (alignRightOfGrid)
+                                alignmentMoveX = paddingX - distanceToLeftEdge;
+                            else
+                                alignmentMoveX = -paddingX - distanceToRightEdge;
+
+                            if (alignAboveGrid)
+                                alignmentMoveY = paddingY - distanceToBottomEdge;
+                            else
+                                alignmentMoveY = -paddingY - distanceToTopEdge;
+
+                            // Rotate for diagonal grids
+                            if (pendingAlignment.ShouldRotate)
+                            {
+                                // Compute rotation angle from the H-token grid's tangent direction
+                                XYZ horizontalGridTangent = GetCurveTangentDirection(pendingAlignment.HorizontalGridCurve);
+                                double rotationAngleRadians = Math.Atan2(horizontalGridTangent.Y, horizontalGridTangent.X);
+
+                                // Keep text readable (not upside down): constrain to ±90° range
+                                if (rotationAngleRadians > Math.PI / 2.0)
+                                    rotationAngleRadians -= Math.PI;
+                                if (rotationAngleRadians < -Math.PI / 2.0)
+                                    rotationAngleRadians += Math.PI;
+
+                                // Rotate the alignment move vector to match the grid direction
+                                double cosAngle = Math.Cos(rotationAngleRadians);
+                                double sinAngle = Math.Sin(rotationAngleRadians);
+                                double rotatedMoveX = alignmentMoveX * cosAngle - alignmentMoveY * sinAngle;
+                                double rotatedMoveY = alignmentMoveX * sinAngle + alignmentMoveY * cosAngle;
+                                alignmentMoveX = rotatedMoveX;
+                                alignmentMoveY = rotatedMoveY;
+
+                                // Rotate the element around the intersection point
+                                Line rotationAxis = Line.CreateBound(
+                                    intersectionPoint,
+                                    intersectionPoint + XYZ.BasisZ);
+                                ElementTransformUtils.RotateElement(
+                                    doc, placedElement.Id, rotationAxis, rotationAngleRadians);
+                            }
+
+                            // Move element to aligned position
+                            XYZ alignmentMoveVector = new XYZ(alignmentMoveX, alignmentMoveY, 0);
+                            ElementTransformUtils.MoveElement(doc, placedElement.Id, alignmentMoveVector);
+                        }
+                        catch (Exception ex)
+                        {
+                            errorCount++;
+                            errorDetails += $"{pendingAlignment.HorizontalGridName} x {pendingAlignment.VerticalGridName} (align): {ex.Message}\n";
+                        }
+                    }
+
                     tx.Commit();
                 }
                 catch (Exception ex)
@@ -1283,7 +1299,7 @@ namespace GridCoords.Forms
                 }
             }
 
-            // Update UI on WPF thread
+            // Update results on the WPF thread
             int placed = placedCount;
             int deleted = deletedCount;
             int skipped = skippedCount;
@@ -1609,10 +1625,29 @@ namespace GridCoords.Forms
         {
             Close();
         }
+
+        /// <summary>
+        /// Holds data for a newly created label element that needs post-creation alignment
+        /// (bounding box measurement, optional rotation, and position adjustment).
+        /// Used by the batched placement pipeline to separate element creation from alignment.
+        /// </summary>
+        private class PendingLabelAlignment
+        {
+            public Element PlacedElement { get; set; }
+            public XYZ IntersectionPoint { get; set; }
+            public Curve HorizontalGridCurve { get; set; }
+            public bool ShouldRotate { get; set; }
+            public string HorizontalGridName { get; set; }
+            public string VerticalGridName { get; set; }
+        }
     }
 
     // ── Data models ──
 
+    /// <summary>
+    /// Represents a single grid row in the checkbox lists. Tracks selection state,
+    /// grid name, orientation classification, and angle for grouping.
+    /// </summary>
     public class GridRowItem : INotifyPropertyChanged
     {
         private bool _isSelected;
@@ -1626,13 +1661,16 @@ namespace GridCoords.Forms
 
         public string GridName { get; set; }
 
+        /// <summary>
+        /// Classification of this grid: "Horizontal", "Vertical", "Diagonal", or "Curved".
+        /// May be reassigned during angle-based clustering.
+        /// </summary>
         public string Orientation
         {
             get => _orientation;
             set { _orientation = value; OnPropertyChanged(); }
         }
 
-        public string DetectedOrientation { get; set; }
         public ElementId GridId { get; set; }
 
         /// <summary>
@@ -1640,10 +1678,6 @@ namespace GridCoords.Forms
         /// 0° = horizontal, 90° = vertical. Curved grids use -1.
         /// </summary>
         public double AngleFromViewHorizontal { get; set; } = -1;
-
-        /// <summary>Options shown in the Angled/Curved section for reassignment.</summary>
-        public List<string> AssignableOrientations { get; } =
-            new List<string> { "Angled", "Curved", "Horizontal", "Vertical" };
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null)
@@ -1771,10 +1805,6 @@ namespace GridCoords.Forms
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    /// <summary>
-    /// Lightweight snapshot of a pairing's selected grids, captured on the UI thread
-    /// for safe use on the Revit external event thread.
-    /// </summary>
     /// <summary>
     /// Lightweight snapshot of a pairing's selected grids and group angles,
     /// captured on the UI thread for safe use on the Revit external event thread.

@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Grid Coords"
-        Height="700" Width="820"
+        Height="900" Width="800"
         MinHeight="450" MinWidth="600"
         ResizeMode="CanResize"
         Topmost="True"
@@ -50,7 +50,7 @@
         <!-- ═══ Two-column main content ═══════════════════════════ -->
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"    MinWidth="260"/>
+                <ColumnDefinition Width="300"    MinWidth="260"/>
                 <ColumnDefinition Width="8"/>
                 <ColumnDefinition Width="1.2*" MinWidth="300"/>
             </Grid.ColumnDefinitions>
@@ -58,6 +58,50 @@
             <!-- ═══ LEFT COLUMN: Settings ═════════════════════════ -->
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
+
+                    <!-- ── GRID SCOPE ─────────────────────────── -->
+                    <Expander Header="Grid Scope">
+                        <StackPanel Margin="2,4">
+                            <RadioButton x:Name="RbScopeAllVisible"
+                                         Content="All Visible Grids"
+                                         GroupName="GridScope"
+                                         IsChecked="True"
+                                         Checked="GridScope_Changed"/>
+                            <RadioButton x:Name="RbScopeSelected"
+                                         Content="Currently Selected Grids"
+                                         GroupName="GridScope"
+                                         Checked="GridScope_Changed"
+                                         ToolTip="Uses grids currently selected in Revit. Auto-refreshes when selection changes."/>
+                            <DockPanel Margin="0,2,0,0">
+                                <RadioButton x:Name="RbScopePick"
+                                             Content="Pick Grids"
+                                             GroupName="GridScope"
+                                             DockPanel.Dock="Left"
+                                             Checked="GridScope_Changed"/>
+                                <StackPanel Orientation="Horizontal"
+                                            DockPanel.Dock="Right"
+                                            HorizontalAlignment="Right">
+                                    <Button x:Name="BtnPick"
+                                            Content="Pick"
+                                            IsEnabled="False"
+                                            Click="BtnPick_Click"
+                                            ToolTip="Click grids in the Revit canvas to select them"/>
+                                    <Button x:Name="BtnClearPick"
+                                            Content="Clear"
+                                            IsEnabled="False"
+                                            Click="BtnClearPick_Click"
+                                            Margin="4,0,0,0"/>
+                                    <TextBlock x:Name="TblPickCount"
+                                               Visibility="Collapsed"
+                                               VerticalAlignment="Center"
+                                               Foreground="Gray"
+                                               FontStyle="Italic"
+                                               FontWeight="Normal"
+                                               Margin="6,0,0,0"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                    </Expander>
 
                     <!-- ── PLACEMENT MODE ─────────────────────── -->
                     <Expander Header="Placement Mode">
@@ -293,50 +337,6 @@
                                Foreground="Gray"/>
                 </DockPanel>
 
-                <!-- ── GRID SCOPE ─────────────────────────────── -->
-                <Expander Header="Grid Scope">
-                    <StackPanel Margin="2,4">
-                        <RadioButton x:Name="RbScopeAllVisible"
-                                     Content="All Visible Grids"
-                                     GroupName="GridScope"
-                                     IsChecked="True"
-                                     Checked="GridScope_Changed"/>
-                        <RadioButton x:Name="RbScopeSelected"
-                                     Content="Currently Selected Grids"
-                                     GroupName="GridScope"
-                                     Checked="GridScope_Changed"
-                                     ToolTip="Uses grids currently selected in Revit. Auto-refreshes when selection changes."/>
-                        <DockPanel Margin="0,2,0,0">
-                            <RadioButton x:Name="RbScopePick"
-                                         Content="Pick Grids"
-                                         GroupName="GridScope"
-                                         DockPanel.Dock="Left"
-                                         Checked="GridScope_Changed"/>
-                            <StackPanel Orientation="Horizontal"
-                                        DockPanel.Dock="Right"
-                                        HorizontalAlignment="Right">
-                                <Button x:Name="BtnPick"
-                                        Content="Pick"
-                                        IsEnabled="False"
-                                        Click="BtnPick_Click"
-                                        ToolTip="Click grids in the Revit canvas to select them"/>
-                                <Button x:Name="BtnClearPick"
-                                        Content="Clear"
-                                        IsEnabled="False"
-                                        Click="BtnClearPick_Click"
-                                        Margin="4,0,0,0"/>
-                                <TextBlock x:Name="TblPickCount"
-                                           Visibility="Collapsed"
-                                           VerticalAlignment="Center"
-                                           Foreground="Gray"
-                                           FontStyle="Italic"
-                                           FontWeight="Normal"
-                                           Margin="6,0,0,0"/>
-                            </StackPanel>
-                        </DockPanel>
-                    </StackPanel>
-                </Expander>
-
                 <!-- ── HORIZONTAL GRIDS ───────────────────────── -->
                 <Expander x:Name="ExpanderHGrids" Header="Horizontal Grids">
                     <StackPanel Margin="2,4">
@@ -391,27 +391,6 @@
                                               FontWeight="Normal"
                                               Checked="GridCheckBox_Changed"
                                               Unchecked="GridCheckBox_Changed"/>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Expander>
-
-                <!-- ── ANGLED / CURVED GRIDS (legacy, now hidden — replaced by dynamic groups) ── -->
-                <Expander x:Name="ExpanderOtherGrids"
-                          Header="Angled / Curved (excluded)"
-                          IsExpanded="False"
-                          Visibility="Collapsed">
-                    <StackPanel Margin="2,4">
-                        <ItemsControl x:Name="OtherGridList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <DockPanel Margin="0,2,0,2">
-                                        <TextBlock Text="{Binding GridName}"
-                                                   Width="60"
-                                                   VerticalAlignment="Center"
-                                                   FontWeight="Normal"/>
-                                    </DockPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
